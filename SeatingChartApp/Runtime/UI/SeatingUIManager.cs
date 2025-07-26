@@ -32,6 +32,11 @@ namespace SeatingChartApp.Runtime.UI
         [SerializeField] private Button clearButton;
         [SerializeField] private Button outOfServiceButton;
         [SerializeField] private TMP_Text feedbackText;
+        [SerializeField] private Button deleteButton;
+
+        [Header("Edit Seat")]
+        [SerializeField] private Button editSeatButton;
+        [SerializeField] private AddSeatUIManager addSeatUIManager;
 
         [Header("Overlay")]
         [SerializeField] private GameObject overlay;
@@ -54,6 +59,9 @@ namespace SeatingChartApp.Runtime.UI
             if (cancelButton != null) cancelButton.onClick.AddListener(ClosePanel);
             if (clearButton != null) clearButton.onClick.AddListener(OnClearSeat);
             if (outOfServiceButton != null) outOfServiceButton.onClick.AddListener(OnToggleOutOfService);
+            if (deleteButton != null) deleteButton.onClick.AddListener(OnDeleteSeat);
+
+            if (editSeatButton != null) editSeatButton.onClick.AddListener(OnEditSeat);
 
             // Input field validation
             if (firstNameInput != null) firstNameInput.onValueChanged.AddListener(_ => ValidateInputs());
@@ -125,6 +133,19 @@ namespace SeatingChartApp.Runtime.UI
             }
             // Hide feedback
             if (feedbackText != null) feedbackText.text = string.Empty;
+            // Show or hide delete button (only admins and when seat is empty)
+            if (deleteButton != null)
+            {
+                bool canDelete = (UserRoleManager.Instance != null && UserRoleManager.Instance.CurrentRole == UserRoleManager.Role.Admin && seat.CurrentGuest == null);
+                deleteButton.gameObject.SetActive(canDelete);
+            }
+
+            // Show or hide edit seat button (only admins)
+            if (editSeatButton != null)
+            {
+                bool canEdit = (UserRoleManager.Instance != null && UserRoleManager.Instance.CurrentRole == UserRoleManager.Role.Admin);
+                editSeatButton.gameObject.SetActive(canEdit);
+            }
             ValidateInputs();
         }
 
@@ -147,6 +168,18 @@ namespace SeatingChartApp.Runtime.UI
                 string.IsNullOrWhiteSpace(partySizeInput?.text))
             {
                 isValid = false;
+            }
+            // Ensure room number contains only digits
+            if (!string.IsNullOrWhiteSpace(roomNumberInput?.text))
+            {
+                foreach (char c in roomNumberInput.text)
+                {
+                    if (!char.IsDigit(c))
+                    {
+                        isValid = false;
+                        break;
+                    }
+                }
             }
             // Party size numeric check
             int size = 0;
@@ -242,6 +275,54 @@ namespace SeatingChartApp.Runtime.UI
             if (LayoutManager.Instance != null)
             {
                 LayoutManager.Instance.MarkLayoutDirty();
+            }
+            ClosePanel();
+        }
+
+        /// <summary>
+        /// Deletes the current seat from the layout and the scene.  Only available
+        /// for admins and when the seat is empty.  Removes the seat from the
+        /// LayoutManager and destroys the GameObject.
+        /// </summary>
+        private void OnDeleteSeat()
+        {
+            if (_currentSeat == null)
+                return;
+            // Ensure we are in admin mode and seat is not occupied
+            if (UserRoleManager.Instance == null || UserRoleManager.Instance.CurrentRole != UserRoleManager.Role.Admin)
+                return;
+            if (_currentSeat.CurrentGuest != null)
+            {
+                if (feedbackText != null)
+                {
+                    feedbackText.text = "Cannot delete an occupied seat.";
+                }
+                return;
+            }
+            // Unregister from layout
+            if (LayoutManager.Instance != null)
+            {
+                LayoutManager.Instance.UnregisterSeat(_currentSeat);
+                LayoutManager.Instance.MarkLayoutDirty();
+            }
+            // Destroy the seat
+            Destroy(_currentSeat.gameObject);
+            ClosePanel();
+        }
+
+        /// <summary>
+        /// Opens the add seat UI manager in edit mode for the current seat.  Only
+        /// available to admins.  Closes the assignment panel when invoked.
+        /// </summary>
+        private void OnEditSeat()
+        {
+            if (_currentSeat == null)
+                return;
+            if (UserRoleManager.Instance == null || UserRoleManager.Instance.CurrentRole != UserRoleManager.Role.Admin)
+                return;
+            if (addSeatUIManager != null)
+            {
+                addSeatUIManager.ShowPanelForEditing(_currentSeat);
             }
             ClosePanel();
         }

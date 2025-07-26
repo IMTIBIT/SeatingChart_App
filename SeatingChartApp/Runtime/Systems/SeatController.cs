@@ -217,24 +217,23 @@ namespace SeatingChartApp.Runtime.Systems
         /// </summary>
         public void OnBeginDrag(PointerEventData eventData)
         {
-            if (UserRoleManager.Instance == null ||
-                UserRoleManager.Instance.CurrentRole != UserRoleManager.Role.Admin)
+            if (UserRoleManager.Instance == null || UserRoleManager.Instance.CurrentRole != UserRoleManager.Role.Admin)
                 return;
-
             _dragging = true;
             RectTransform rect = transform as RectTransform;
-            RectTransform parentRect = rect.parent as RectTransform ?? rect;
-
-            // Compute the pointer position relative to the parent rect, not just the seat itself
+            // Use the same parent rect that OnDrag will use for coordinate conversion
+            RectTransform parentRect = rect.parent as RectTransform;
+            if (parentRect == null)
+            {
+                parentRect = rect;
+            }
             Vector2 localPoint;
-            RectTransformUtility.ScreenPointToLocalPointInRectangle(
-                parentRect, eventData.position, eventData.pressEventCamera, out localPoint);
-
-            // Offset is seat’s anchored position minus the pointer’s local point
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(parentRect, eventData.position, eventData.pressEventCamera, out localPoint);
+            // Record the offset relative to the parent coordinate system
             _dragOffset = rect.anchoredPosition - localPoint;
+            // Record starting position for potential collision detection
             _startPosition = rect.anchoredPosition;
-
-            // Visual feedback (as before)
+            // Store original visuals and apply feedback
             _originalScale = transform.localScale;
             _originalColor = SeatImage != null ? SeatImage.color : Color.white;
             transform.localScale = _originalScale * 1.1f;
@@ -245,7 +244,6 @@ namespace SeatingChartApp.Runtime.Systems
                 SeatImage.color = c;
             }
         }
-
 
         /// <summary>
         /// Continues dragging.  Only active for admins.  Moves the seat

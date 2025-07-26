@@ -15,6 +15,8 @@ namespace SeatingChartApp.Runtime.Systems
     /// </summary>
     public class AreaManager : MonoBehaviour
     {
+        // Singleton instance for easy access from other systems
+        public static AreaManager Instance { get; private set; }
         [Tooltip("Dropdown used to select the active seating area.")]
         public TMP_Dropdown areaDropdown;
 
@@ -23,6 +25,21 @@ namespace SeatingChartApp.Runtime.Systems
 
         [Tooltip("Parent transforms for each seating area.  Each should contain the seat instances for that area.")]
         public List<Transform> areaContainers = new List<Transform>();
+
+        // Index of the currently active area
+        private int _currentAreaIndex = -1;
+
+        private void Awake()
+        {
+            // Setup singleton instance
+            if (Instance != null && Instance != this)
+            {
+                Destroy(gameObject);
+                return;
+            }
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
+        }
 
         private LayoutManager _layoutManager;
 
@@ -67,6 +84,8 @@ namespace SeatingChartApp.Runtime.Systems
                 return;
             if (index < 0 || index >= areaContainers.Count)
                 return;
+            // Record current index
+            _currentAreaIndex = index;
             // Save current area layout via layout manager
             // Deactivate all area containers
             for (int i = 0; i < areaContainers.Count; i++)
@@ -84,6 +103,20 @@ namespace SeatingChartApp.Runtime.Systems
             }
             string areaName = areaNames != null && index < areaNames.Count ? areaNames[index] : $"Area{index}";
             _layoutManager.SwitchArea(areaName, seats);
+        }
+
+        /// <summary>
+        /// Returns the container transform for the currently selected area.  Useful when
+        /// spawning new seats so they are parented to the correct area.  May return null
+        /// if no area has been selected yet.
+        /// </summary>
+        public Transform GetCurrentAreaContainer()
+        {
+            if (_currentAreaIndex < 0 || _currentAreaIndex >= areaContainers.Count)
+            {
+                return null;
+            }
+            return areaContainers[_currentAreaIndex];
         }
     }
 }

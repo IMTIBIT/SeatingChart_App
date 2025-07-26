@@ -116,12 +116,22 @@ namespace SeatingChartApp.Editor
             Button oosBtn = CreateStyledButton("ToggleOOSButton", assignmentPanel.transform, "Out of Service", whiteSprite);
             oosBtn.GetComponent<RectTransform>().anchoredPosition = new Vector2(150f, -300f);
             SetPrivateField(seatingUI, "outOfServiceButton", oosBtn);
+
+            // Delete seat button (admin only).  Centrally aligned below other buttons
+            Button deleteBtn = CreateStyledButton("DeleteSeatButton", assignmentPanel.transform, "Delete Seat", whiteSprite);
+            deleteBtn.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, -380f);
+            SetPrivateField(seatingUI, "deleteButton", deleteBtn);
+
+            // Edit seat button (admin only).  Positioned next to Delete seat
+            Button editSeatBtn = CreateStyledButton("EditSeatButton", assignmentPanel.transform, "Edit Seat", whiteSprite);
+            editSeatBtn.GetComponent<RectTransform>().anchoredPosition = new Vector2(150f, -380f);
+            SetPrivateField(seatingUI, "editSeatButton", editSeatBtn);
             // Feedback text
             TMP_Text feedback = CreateText("FeedbackText", assignmentPanel.transform, string.Empty, Color.red);
             feedback.alignment = TextAlignmentOptions.Center;
             RectTransform feedbackRT = feedback.GetComponent<RectTransform>();
             feedbackRT.sizeDelta = new Vector2(500f, 50f);
-            feedbackRT.anchoredPosition = new Vector2(0f, -370f);
+            feedbackRT.anchoredPosition = new Vector2(0f, -450f);
             SetPrivateField(seatingUI, "feedbackText", feedback);
 
             // Create a full‑screen overlay to dismiss the assignment panel by tapping outside
@@ -140,6 +150,79 @@ namespace SeatingChartApp.Editor
             overlay.SetActive(false);
             // Assign overlay to the seating UI manager
             SetPrivateField(seatingUI, "overlay", overlay);
+
+            // ----- Add Seat UI Panel -----
+            // Create a panel for adding new seats.  Admins will open this via AdminToolsManager.
+            GameObject addSeatPanel = CreatePanel("AddSeatPanel", canvasGO.transform, new Vector2(500f, 600f), new Color(1f, 1f, 1f, 0.95f), whiteSprite);
+            RectTransform addSeatRT = addSeatPanel.GetComponent<RectTransform>();
+            addSeatRT.anchoredPosition = Vector2.zero;
+            // Title
+            TMP_Text addSeatTitle = CreateText("AddSeatTitle", addSeatPanel.transform, "Add Seat", Color.black);
+            addSeatTitle.alignment = TextAlignmentOptions.Center;
+            addSeatTitle.GetComponent<RectTransform>().sizeDelta = new Vector2(400f, 60f);
+            addSeatTitle.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, 250f);
+            // Seat type dropdown
+            TMP_Dropdown seatTypeDropdown = CreateDropdown("SeatTypeDropdown", addSeatPanel.transform, new string[] { "Seat Type" });
+            RectTransform typeRT = seatTypeDropdown.GetComponent<RectTransform>();
+            typeRT.sizeDelta = new Vector2(380f, 60f);
+            typeRT.anchoredPosition = new Vector2(0f, 150f);
+            // Seat label input
+            TMP_InputField seatLabelInput = CreateInputField("SeatLabelInput", addSeatPanel.transform, "Seat Name / ID");
+            seatLabelInput.GetComponent<RectTransform>().sizeDelta = new Vector2(380f, 60f);
+            seatLabelInput.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, 70f);
+            // Capacity input
+            TMP_InputField capacityInput = CreateInputField("CapacityInput", addSeatPanel.transform, "Capacity");
+            capacityInput.contentType = TMP_InputField.ContentType.IntegerNumber;
+            capacityInput.GetComponent<RectTransform>().sizeDelta = new Vector2(380f, 60f);
+            capacityInput.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, -10f);
+            // Error text
+            TMP_Text addSeatError = CreateText("AddSeatError", addSeatPanel.transform, string.Empty, Color.red);
+            addSeatError.alignment = TextAlignmentOptions.Center;
+            addSeatError.GetComponent<RectTransform>().sizeDelta = new Vector2(420f, 40f);
+            addSeatError.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, -80f);
+            // Add and Cancel buttons
+            Button addSeatBtn = CreateStyledButton("AddSeatConfirmButton", addSeatPanel.transform, "Add", whiteSprite);
+            addSeatBtn.GetComponent<RectTransform>().sizeDelta = new Vector2(160f, 60f);
+            addSeatBtn.GetComponent<RectTransform>().anchoredPosition = new Vector2(-100f, -180f);
+            Button addSeatCancelBtn = CreateStyledButton("AddSeatCancelButton", addSeatPanel.transform, "Cancel", whiteSprite);
+            addSeatCancelBtn.GetComponent<RectTransform>().sizeDelta = new Vector2(160f, 60f);
+            addSeatCancelBtn.GetComponent<RectTransform>().anchoredPosition = new Vector2(100f, -180f);
+            // AddSeatUIManager component
+            AddSeatUIManager addSeatUI = canvasGO.AddComponent<AddSeatUIManager>();
+            // Use reflection to assign private fields
+            SetPrivateField(addSeatUI, "addSeatPanel", addSeatPanel);
+            SetPrivateField(addSeatUI, "seatTypeDropdown", seatTypeDropdown);
+            SetPrivateField(addSeatUI, "seatLabelInput", seatLabelInput);
+            SetPrivateField(addSeatUI, "capacityInput", capacityInput);
+            SetPrivateField(addSeatUI, "addButton", addSeatBtn);
+            SetPrivateField(addSeatUI, "cancelButton", addSeatCancelBtn);
+            SetPrivateField(addSeatUI, "errorText", addSeatError);
+            // Provide a basic seat prefab so the dropdown has an option.  Create a
+            // simple rectangular seat with a SeatController and Image.  The
+            // prefab is stored in memory only; users can replace it later.
+            {
+                GameObject seatPrefab = new GameObject("DefaultSeat", typeof(RectTransform), typeof(Image), typeof(SeatController));
+                RectTransform seatRt = seatPrefab.GetComponent<RectTransform>();
+                seatRt.sizeDelta = new Vector2(100f, 100f);
+                seatRt.anchorMin = seatRt.anchorMax = new Vector2(0.5f, 0.5f);
+                seatRt.pivot = new Vector2(0.5f, 0.5f);
+                Image seatImage = seatPrefab.GetComponent<Image>();
+                seatImage.sprite = whiteSprite;
+                seatImage.type = Image.Type.Sliced;
+                seatImage.color = new Color(0.8f, 0.8f, 0.8f, 1f);
+                SeatController controller = seatPrefab.GetComponent<SeatController>();
+                controller.SeatImage = seatImage;
+                controller.Capacity = 1;
+                controller.snapToGrid = true;
+                controller.gridSize = 50f;
+                // Add this prefab to the seatPrefabs list
+                addSeatUI.seatPrefabs = new System.Collections.Generic.List<GameObject> { seatPrefab };
+            }
+            // Hide the panel initially
+            addSeatPanel.SetActive(false);
+
+            // Assign AddSeatUIManager reference to SeatingUIManager for editing existing seats
+            SetPrivateField(seatingUI, "addSeatUIManager", addSeatUI);
 
             // ----- LoginUIManager -----
             LoginUIManager loginUI = canvasGO.AddComponent<LoginUIManager>();
@@ -177,11 +260,24 @@ namespace SeatingChartApp.Editor
             SetPrivateField(adminTools, "resetLayoutButton", resetBtn);
             SetPrivateField(adminTools, "roleSwitchButton", switchBtn);
 
+            // Add seat button for admins (below other buttons)
+            Button addSeatAdminBtn = CreateStyledButton("AddSeatButton", adminPanel.transform, "Add Seat", whiteSprite);
+            addSeatAdminBtn.GetComponent<RectTransform>().anchoredPosition = new Vector2(0f, -80f);
+            SetPrivateField(adminTools, "addSeatButton", addSeatAdminBtn);
+            // Link AddSeatUIManager to AdminToolsManager for opening the Add Seat panel
+            SetPrivateField(adminTools, "addSeatUIManager", addSeatUI);
+
             // ----- Top bar login button -----
             Button openLogin = CreateStyledButton("OpenLoginButton", topBar.transform, "Admin Login", whiteSprite);
             openLogin.GetComponent<RectTransform>().sizeDelta = new Vector2(200f, 70f);
             openLogin.GetComponent<RectTransform>().anchoredPosition = new Vector2(-900f, -35f);
             openLogin.onClick.AddListener(() => loginUI.ShowLoginPanel());
+
+            // Role indicator button (hidden when not in admin mode).  Adds RoleIndicatorButton script to manage label and toggling.
+            Button roleIndicatorBtn = CreateStyledButton("RoleIndicator", topBar.transform, "", whiteSprite);
+            roleIndicatorBtn.GetComponent<RectTransform>().sizeDelta = new Vector2(320f, 70f);
+            roleIndicatorBtn.GetComponent<RectTransform>().anchoredPosition = new Vector2(900f, -35f);
+            roleIndicatorBtn.gameObject.AddComponent<RoleIndicatorButton>();
 
             // ----- Area dropdown and AreaManager -----
             // Dropdown to choose between different pool areas.  Place near the top bar centre.

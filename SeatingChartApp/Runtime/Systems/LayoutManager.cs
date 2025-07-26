@@ -228,5 +228,34 @@ namespace SeatingChartApp.Runtime.Systems
             }
             MarkLayoutDirty();
         }
+
+        /// <summary>
+        /// Registers a seat with the layout manager.  If the seat is already
+        /// present in the Seats list it will not be added again.  This should
+        /// be called when dynamically creating seats at runtime (e.g. via the
+        /// Add Seat UI).  Seats created in the scene at start will be
+        /// discovered automatically in Start().
+        /// </summary>
+        public void RegisterSeat(SeatController seat)
+        {
+            if (seat == null)
+                return;
+            if (!Seats.Contains(seat))
+            {
+                Seats.Add(seat);
+            }
+        }
+
+        /// <summary>
+        /// Unregisters a seat from the layout manager.  Call this when
+        /// destroying seats so they are removed from the internal list and
+        /// not persisted.  If the seat is not found no action is taken.
+        /// </summary>
+        public void UnregisterSeat(SeatController seat)
+        {
+            if (seat == null)
+                return;
+            Seats.Remove(seat);
+        }
     }
 }

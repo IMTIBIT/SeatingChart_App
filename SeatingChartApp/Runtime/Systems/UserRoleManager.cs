@@ -57,5 +57,21 @@ namespace SeatingChartApp.Runtime.Systems
                 OnRoleChanged?.Invoke(newRole);
             }
         }
+
+        /// <summary>
+        /// Toggles between Admin and Attendant roles.  Useful for quick
+        /// switching via a UI button.  Will emit the OnRoleChanged event.
+        /// </summary>
+        public void ToggleRole()
+        {
+            if (CurrentRole == Role.Admin)
+            {
+                SetRole(Role.Attendant);
+            }
+            else
+            {
+                SetRole(Role.Admin);
+            }
+        }
     }
 }
