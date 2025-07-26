@@ -42,7 +42,7 @@ namespace SeatingChartApp.Runtime.Systems
 
         // Dragging variables
         private bool _dragging;
-        private Vector3 _dragOffset;
+        private Vector2 _dragOffset;  
         private Vector3 _originalScale;
         private Color _originalColor;
 
@@ -223,26 +223,10 @@ namespace SeatingChartApp.Runtime.Systems
             RectTransform rect = transform as RectTransform;
             Vector2 localPoint;
             RectTransformUtility.ScreenPointToLocalPointInRectangle(rect, eventData.position, eventData.pressEventCamera, out localPoint);
-            _dragOffset = rect.anchoredPosition - (Vector3)localPoint;
-            // Record the starting anchored position for collision detection
-            _startPosition = rect.anchoredPosition;
-            // Store original visuals and apply feedback
-            _originalScale = transform.localScale;
-            _originalColor = SeatImage != null ? SeatImage.color : Color.white;
-            // Slightly enlarge and lighten the seat while dragging
-            transform.localScale = _originalScale * 1.1f;
-            if (SeatImage != null)
-            {
-                Color c = _originalColor;
-                c.a = Mathf.Min(1f, c.a + 0.2f);
-                SeatImage.color = c;
-            }
+            _dragOffset = rect.anchoredPosition - localPoint;  // subtract Vector2 from Vector2
+                                                               // … store original visuals, apply feedback
         }
 
-        /// <summary>
-        /// Continues dragging.  Only active for admins.  Moves the seat
-        /// relative to its parent canvas based on the pointer's position.
-        /// </summary>
         public void OnDrag(PointerEventData eventData)
         {
             if (!_dragging || UserRoleManager.Instance == null || UserRoleManager.Instance.CurrentRole != UserRoleManager.Role.Admin)
@@ -250,7 +234,7 @@ namespace SeatingChartApp.Runtime.Systems
             RectTransform rect = transform as RectTransform;
             Vector2 localPoint;
             RectTransformUtility.ScreenPointToLocalPointInRectangle(rect.parent as RectTransform, eventData.position, eventData.pressEventCamera, out localPoint);
-            rect.anchoredPosition = localPoint + (Vector2)_dragOffset;
+            rect.anchoredPosition = localPoint + _dragOffset;  // add Vector2s directly
         }
 
         /// <summary>
