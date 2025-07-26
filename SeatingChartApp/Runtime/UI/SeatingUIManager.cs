@@ -33,6 +33,9 @@ namespace SeatingChartApp.Runtime.UI
         [SerializeField] private Button outOfServiceButton;
         [SerializeField] private TMP_Text feedbackText;
 
+        [Header("Overlay")]
+        [SerializeField] private GameObject overlay;
+
         // Currently selected seat for editing
         private SeatController _currentSeat;
 
@@ -69,10 +72,17 @@ namespace SeatingChartApp.Runtime.UI
         {
             if (seat == null)
                 return;
+            // Close any existing panel before opening a new one
+            ClosePanel();
             _currentSeat = seat;
             if (assignmentPanel != null)
             {
                 assignmentPanel.SetActive(true);
+            }
+            // Activate overlay to allow tap‑outside dismissal
+            if (overlay != null)
+            {
+                overlay.SetActive(true);
             }
             // Update header text
             if (seatHeaderText != null)
@@ -246,6 +256,10 @@ namespace SeatingChartApp.Runtime.UI
             if (assignmentPanel != null)
             {
                 assignmentPanel.SetActive(false);
+            }
+            if (overlay != null)
+            {
+                overlay.SetActive(false);
             }
             _currentSeat = null;
         }

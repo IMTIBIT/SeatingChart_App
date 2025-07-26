@@ -42,7 +42,7 @@ namespace SeatingChartApp.Runtime.Systems
 
         // Dragging variables
         private bool _dragging;
-        private Vector2 _dragOffset;  
+        private Vector2 _dragOffset;
         private Vector3 _originalScale;
         private Color _originalColor;
 
@@ -50,7 +50,7 @@ namespace SeatingChartApp.Runtime.Systems
         [Tooltip("Enable snapping seat positions to a grid on drag end.")]
         public bool snapToGrid = true;
         [Tooltip("Grid size in pixels for snapping.")]
-        public float gridSize = 20f;
+        public float gridSize = 50f;
 
         // Stores the starting position before a drag begins to detect collisions or revert
         private Vector2 _startPosition;
@@ -223,10 +223,26 @@ namespace SeatingChartApp.Runtime.Systems
             RectTransform rect = transform as RectTransform;
             Vector2 localPoint;
             RectTransformUtility.ScreenPointToLocalPointInRectangle(rect, eventData.position, eventData.pressEventCamera, out localPoint);
-            _dragOffset = rect.anchoredPosition - localPoint;  // subtract Vector2 from Vector2
-                                                               // … store original visuals, apply feedback
+            _dragOffset = rect.anchoredPosition - localPoint;
+            // Record the starting anchored position for collision detection
+            _startPosition = rect.anchoredPosition;
+            // Store original visuals and apply feedback
+            _originalScale = transform.localScale;
+            _originalColor = SeatImage != null ? SeatImage.color : Color.white;
+            // Slightly enlarge and lighten the seat while dragging
+            transform.localScale = _originalScale * 1.1f;
+            if (SeatImage != null)
+            {
+                Color c = _originalColor;
+                c.a = Mathf.Min(1f, c.a + 0.2f);
+                SeatImage.color = c;
+            }
         }
 
+        /// <summary>
+        /// Continues dragging.  Only active for admins.  Moves the seat
+        /// relative to its parent canvas based on the pointer's position.
+        /// </summary>
         public void OnDrag(PointerEventData eventData)
         {
             if (!_dragging || UserRoleManager.Instance == null || UserRoleManager.Instance.CurrentRole != UserRoleManager.Role.Admin)
@@ -234,7 +250,19 @@ namespace SeatingChartApp.Runtime.Systems
             RectTransform rect = transform as RectTransform;
             Vector2 localPoint;
             RectTransformUtility.ScreenPointToLocalPointInRectangle(rect.parent as RectTransform, eventData.position, eventData.pressEventCamera, out localPoint);
-            rect.anchoredPosition = localPoint + _dragOffset;  // add Vector2s directly
+            // Calculate new position and clamp within parent bounds
+            Vector2 newPos = localPoint + _dragOffset;
+            RectTransform parent = rect.parent as RectTransform;
+            if (parent != null)
+            {
+                float halfParentWidth = parent.rect.width * 0.5f;
+                float halfParentHeight = parent.rect.height * 0.5f;
+                float halfWidth = rect.rect.width * 0.5f;
+                float halfHeight = rect.rect.height * 0.5f;
+                newPos.x = Mathf.Clamp(newPos.x, -halfParentWidth + halfWidth, halfParentWidth - halfWidth);
+                newPos.y = Mathf.Clamp(newPos.y, -halfParentHeight + halfHeight, halfParentHeight - halfHeight);
+            }
+            rect.anchoredPosition = newPos;
         }
 
         /// <summary>
@@ -282,6 +310,22 @@ namespace SeatingChartApp.Runtime.Systems
                         }
                     }
                     rect.anchoredPosition = pos;
+                }
+            }
+            // Clamp within parent bounds after snapping
+            if (rect != null)
+            {
+                RectTransform parent = rect.parent as RectTransform;
+                if (parent != null)
+                {
+                    Vector2 snapPos = rect.anchoredPosition;
+                    float halfParentWidth = parent.rect.width * 0.5f;
+                    float halfParentHeight = parent.rect.height * 0.5f;
+                    float halfWidth = rect.rect.width * 0.5f;
+                    float halfHeight = rect.rect.height * 0.5f;
+                    snapPos.x = Mathf.Clamp(snapPos.x, -halfParentWidth + halfWidth, halfParentWidth - halfWidth);
+                    snapPos.y = Mathf.Clamp(snapPos.y, -halfParentHeight + halfHeight, halfParentHeight - halfHeight);
+                    rect.anchoredPosition = snapPos;
                 }
             }
             if (LayoutManager.Instance != null)
