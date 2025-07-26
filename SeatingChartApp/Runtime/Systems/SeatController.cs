@@ -217,19 +217,26 @@ namespace SeatingChartApp.Runtime.Systems
         /// </summary>
         public void OnBeginDrag(PointerEventData eventData)
         {
-            if (UserRoleManager.Instance == null || UserRoleManager.Instance.CurrentRole != UserRoleManager.Role.Admin)
+            if (UserRoleManager.Instance == null ||
+                UserRoleManager.Instance.CurrentRole != UserRoleManager.Role.Admin)
                 return;
+
             _dragging = true;
             RectTransform rect = transform as RectTransform;
+            RectTransform parentRect = rect.parent as RectTransform ?? rect;
+
+            // Compute the pointer position relative to the parent rect, not just the seat itself
             Vector2 localPoint;
-            RectTransformUtility.ScreenPointToLocalPointInRectangle(rect, eventData.position, eventData.pressEventCamera, out localPoint);
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                parentRect, eventData.position, eventData.pressEventCamera, out localPoint);
+
+            // Offset is seat’s anchored position minus the pointer’s local point
             _dragOffset = rect.anchoredPosition - localPoint;
-            // Record the starting anchored position for collision detection
             _startPosition = rect.anchoredPosition;
-            // Store original visuals and apply feedback
+
+            // Visual feedback (as before)
             _originalScale = transform.localScale;
             _originalColor = SeatImage != null ? SeatImage.color : Color.white;
-            // Slightly enlarge and lighten the seat while dragging
             transform.localScale = _originalScale * 1.1f;
             if (SeatImage != null)
             {
@@ -239,6 +246,7 @@ namespace SeatingChartApp.Runtime.Systems
             }
         }
 
+
         /// <summary>
         /// Continues dragging.  Only active for admins.  Moves the seat
         /// relative to its parent canvas based on the pointer's position.
@@ -247,16 +255,25 @@ namespace SeatingChartApp.Runtime.Systems
         {
             if (!_dragging || UserRoleManager.Instance == null || UserRoleManager.Instance.CurrentRole != UserRoleManager.Role.Admin)
                 return;
+            // Cache our own RectTransform
             RectTransform rect = transform as RectTransform;
-            Vector2 localPoint;
-            RectTransformUtility.ScreenPointToLocalPointInRectangle(rect.parent as RectTransform, eventData.position, eventData.pressEventCamera, out localPoint);
-            // Calculate new position and clamp within parent bounds
-            Vector2 newPos = localPoint + _dragOffset;
-            RectTransform parent = rect.parent as RectTransform;
-            if (parent != null)
+            // Use our parent RectTransform for coordinate conversion; if none exists
+            // (i.e. the seat is not under a UI RectTransform), fall back to our own rect.
+            RectTransform parentRect = rect.parent as RectTransform;
+            if (parentRect == null)
             {
-                float halfParentWidth = parent.rect.width * 0.5f;
-                float halfParentHeight = parent.rect.height * 0.5f;
+                parentRect = rect;
+            }
+            Vector2 localPoint;
+            // Convert the screen point into local coordinates relative to the parent rect.
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(parentRect, eventData.position, eventData.pressEventCamera, out localPoint);
+            // Calculate new position based on the drag offset recorded on begin drag.
+            Vector2 newPos = localPoint + _dragOffset;
+            // Clamp the seat within the bounds of the parent rect to prevent dragging off‑screen.
+            if (parentRect != null)
+            {
+                float halfParentWidth = parentRect.rect.width * 0.5f;
+                float halfParentHeight = parentRect.rect.height * 0.5f;
                 float halfWidth = rect.rect.width * 0.5f;
                 float halfHeight = rect.rect.height * 0.5f;
                 newPos.x = Mathf.Clamp(newPos.x, -halfParentWidth + halfWidth, halfParentWidth - halfWidth);
