@@ -21,6 +21,11 @@ namespace SeatingChartApp.Runtime.UI
         [Header("Add Seat UI Manager")]
         [SerializeField] private AddSeatUIManager addSeatUIManager;
 
+        [Header("Search & Filter Controls")]
+        [SerializeField] private TMPro.TMP_InputField searchInput;
+        [SerializeField] private Button searchButton;
+        [SerializeField] private TMPro.TMP_Dropdown filterDropdown;
+
         private void Awake()
         {
             if (resetLayoutButton != null)
@@ -34,6 +39,16 @@ namespace SeatingChartApp.Runtime.UI
             if (addSeatButton != null)
             {
                 addSeatButton.onClick.AddListener(OnAddSeat);
+            }
+
+            // Search and filter listeners
+            if (searchButton != null)
+            {
+                searchButton.onClick.AddListener(OnSearch);
+            }
+            if (filterDropdown != null)
+            {
+                filterDropdown.onValueChanged.AddListener(OnFilterChanged);
             }
 
             // Subscribe to role changes to update button visibility
@@ -100,6 +115,66 @@ namespace SeatingChartApp.Runtime.UI
             if (resetLayoutButton != null) resetLayoutButton.gameObject.SetActive(isAdmin);
             if (roleSwitchButton != null) roleSwitchButton.gameObject.SetActive(true); // always show role switch for testing
             if (addSeatButton != null) addSeatButton.gameObject.SetActive(isAdmin);
+            // Search and filter controls are admin-only
+            if (searchInput != null) searchInput.gameObject.SetActive(isAdmin);
+            if (searchButton != null) searchButton.gameObject.SetActive(isAdmin);
+            if (filterDropdown != null) filterDropdown.gameObject.SetActive(isAdmin);
+        }
+
+        /// <summary>
+        /// Searches seats for the provided query.  Highlights matching seats by
+        /// temporarily tinting their colour.  Clears previous highlights when
+        /// the search field is empty.
+        /// </summary>
+        private void OnSearch()
+        {
+            if (LayoutManager.Instance == null)
+                return;
+            string query = searchInput != null ? searchInput.text.Trim().ToLowerInvariant() : string.Empty;
+            foreach (var seat in LayoutManager.Instance.Seats)
+            {
+                if (seat == null) continue;
+                // Reset to default colours
+                seat.UpdateVisualState();
+                if (string.IsNullOrEmpty(query))
+                    continue;
+                bool match = false;
+                // Check seat ID
+                if (seat.SeatID.ToString().ToLowerInvariant().Contains(query)) match = true;
+                // Check current guest details
+                if (seat.CurrentGuest != null)
+                {
+                    if (!string.IsNullOrEmpty(seat.CurrentGuest.FirstName) && seat.CurrentGuest.FirstName.ToLowerInvariant().Contains(query)) match = true;
+                    if (!string.IsNullOrEmpty(seat.CurrentGuest.LastName) && seat.CurrentGuest.LastName.ToLowerInvariant().Contains(query)) match = true;
+                    if (!string.IsNullOrEmpty(seat.CurrentGuest.RoomNumber) && seat.CurrentGuest.RoomNumber.ToLowerInvariant().Contains(query)) match = true;
+                }
+                if (match && seat.SeatImage != null)
+                {
+                    // Lighten the seat colour to indicate a match
+                    seat.SeatImage.color = Color.cyan;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Filters seats by their current state.  Only shows seats matching
+        /// the selected state or all seats if "All" is chosen.
+        /// </summary>
+        private void OnFilterChanged(int index)
+        {
+            if (LayoutManager.Instance == null || filterDropdown == null)
+                return;
+            string selected = filterDropdown.options[index].text;
+            foreach (var seat in LayoutManager.Instance.Seats)
+            {
+                if (seat == null) continue;
+                bool visible = true;
+                if (!string.IsNullOrEmpty(selected) && !selected.Equals("All", System.StringComparison.OrdinalIgnoreCase))
+                {
+                    visible = seat.State.ToString().Equals(selected, System.StringComparison.OrdinalIgnoreCase);
+                }
+                seat.gameObject.SetActive(visible);
+            }
         }
     }
 }

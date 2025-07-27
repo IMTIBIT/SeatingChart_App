@@ -201,22 +201,40 @@ namespace SeatingChartApp.Editor
             // simple rectangular seat with a SeatController and Image.  The
             // prefab is stored in memory only; users can replace it later.
             {
-                GameObject seatPrefab = new GameObject("DefaultSeat", typeof(RectTransform), typeof(Image), typeof(SeatController));
-                RectTransform seatRt = seatPrefab.GetComponent<RectTransform>();
-                seatRt.sizeDelta = new Vector2(100f, 100f);
-                seatRt.anchorMin = seatRt.anchorMax = new Vector2(0.5f, 0.5f);
-                seatRt.pivot = new Vector2(0.5f, 0.5f);
-                Image seatImage = seatPrefab.GetComponent<Image>();
-                seatImage.sprite = whiteSprite;
-                seatImage.type = Image.Type.Sliced;
-                seatImage.color = new Color(0.8f, 0.8f, 0.8f, 1f);
-                SeatController controller = seatPrefab.GetComponent<SeatController>();
-                controller.SeatImage = seatImage;
-                controller.Capacity = 1;
-                controller.snapToGrid = true;
-                controller.gridSize = 50f;
-                // Add this prefab to the seatPrefabs list
-                addSeatUI.seatPrefabs = new System.Collections.Generic.List<GameObject> { seatPrefab };
+                // Create a default chair prefab
+                GameObject chairPrefab = new GameObject("Chair", typeof(RectTransform), typeof(Image), typeof(SeatController));
+                RectTransform chairRt = chairPrefab.GetComponent<RectTransform>();
+                chairRt.sizeDelta = new Vector2(100f, 100f);
+                chairRt.anchorMin = chairRt.anchorMax = new Vector2(0.5f, 0.5f);
+                chairRt.pivot = new Vector2(0.5f, 0.5f);
+                Image chairImage = chairPrefab.GetComponent<Image>();
+                chairImage.sprite = whiteSprite;
+                chairImage.type = Image.Type.Sliced;
+                chairImage.color = new Color(0.8f, 0.8f, 0.8f, 1f);
+                SeatController chairController = chairPrefab.GetComponent<SeatController>();
+                chairController.SeatImage = chairImage;
+                chairController.Capacity = 1;
+                chairController.snapToGrid = true;
+                chairController.gridSize = 50f;
+
+                // Create a default table prefab (larger size, higher capacity)
+                GameObject tablePrefab = new GameObject("Table", typeof(RectTransform), typeof(Image), typeof(SeatController));
+                RectTransform tableRt = tablePrefab.GetComponent<RectTransform>();
+                tableRt.sizeDelta = new Vector2(200f, 120f);
+                tableRt.anchorMin = tableRt.anchorMax = new Vector2(0.5f, 0.5f);
+                tableRt.pivot = new Vector2(0.5f, 0.5f);
+                Image tableImage = tablePrefab.GetComponent<Image>();
+                tableImage.sprite = whiteSprite;
+                tableImage.type = Image.Type.Sliced;
+                tableImage.color = new Color(0.7f, 0.7f, 0.7f, 1f);
+                SeatController tableController = tablePrefab.GetComponent<SeatController>();
+                tableController.SeatImage = tableImage;
+                tableController.Capacity = 4;
+                tableController.snapToGrid = true;
+                tableController.gridSize = 50f;
+
+                // Add these prefabs to the seatPrefabs list
+                addSeatUI.seatPrefabs = new System.Collections.Generic.List<GameObject> { chairPrefab, tablePrefab };
             }
             // Hide the panel initially
             addSeatPanel.SetActive(false);
@@ -266,6 +284,27 @@ namespace SeatingChartApp.Editor
             SetPrivateField(adminTools, "addSeatButton", addSeatAdminBtn);
             // Link AddSeatUIManager to AdminToolsManager for opening the Add Seat panel
             SetPrivateField(adminTools, "addSeatUIManager", addSeatUI);
+
+            // --- Search & Filter UI ---
+            // Input field for searching by seat ID, guest name or room number
+            TMP_InputField searchInput = CreateInputField("SearchInput", adminPanel.transform, "Search Name/Room/ID");
+            RectTransform searchRT = searchInput.GetComponent<RectTransform>();
+            // Position search input below the Add Seat button
+            searchRT.sizeDelta = new Vector2(280f, 60f);
+            searchRT.anchoredPosition = new Vector2(-70f, -160f);
+            SetPrivateField(adminTools, "searchInput", searchInput);
+            // Search button
+            Button searchBtn = CreateStyledButton("SearchButton", adminPanel.transform, "Search", whiteSprite);
+            RectTransform searchBtnRT = searchBtn.GetComponent<RectTransform>();
+            searchBtnRT.sizeDelta = new Vector2(120f, 60f);
+            searchBtnRT.anchoredPosition = new Vector2(190f, -160f);
+            SetPrivateField(adminTools, "searchButton", searchBtn);
+            // Filter dropdown to filter seats by state
+            TMP_Dropdown filterDropdown = CreateDropdown("FilterDropdown", adminPanel.transform, new string[] { "All", "Available", "Occupied", "Reserved", "Cleaning", "OutOfService" });
+            RectTransform filterRT = filterDropdown.GetComponent<RectTransform>();
+            filterRT.sizeDelta = new Vector2(400f, 60f);
+            filterRT.anchoredPosition = new Vector2(0f, -240f);
+            SetPrivateField(adminTools, "filterDropdown", filterDropdown);
 
             // ----- Top bar login button -----
             Button openLogin = CreateStyledButton("OpenLoginButton", topBar.transform, "Admin Login", whiteSprite);

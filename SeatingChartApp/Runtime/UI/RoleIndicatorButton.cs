@@ -40,15 +40,19 @@ namespace SeatingChartApp.Runtime.UI
 
         private void OnRoleChanged(UserRoleManager.Role role)
         {
-            bool isAdmin = role == UserRoleManager.Role.Admin;
+            // Show the role indicator at all times.  Display "ADM" for Admin, "ATD" for Attendant.
             if (_button != null)
             {
-                _button.gameObject.SetActive(isAdmin);
+                _button.gameObject.SetActive(true);
+                // Only allow clicking when admin (to switch back to attendant).  Attendant indicator is read‑only.
+                _button.interactable = role == UserRoleManager.Role.Admin;
             }
             if (_label != null)
             {
-                _label.text = isAdmin ? "Admin Mode (Tap to exit)" : string.Empty;
-                _label.color = isAdmin ? new Color(0.9f, 0.2f, 0.2f) : Color.black;
+                // Abbreviations for roles
+                _label.text = role == UserRoleManager.Role.Admin ? "ADM" : "ATD";
+                // Colour hint: red for admin, green for attendant
+                _label.color = role == UserRoleManager.Role.Admin ? new Color(0.9f, 0.2f, 0.2f) : new Color(0.2f, 0.7f, 0.2f);
             }
         }
 
