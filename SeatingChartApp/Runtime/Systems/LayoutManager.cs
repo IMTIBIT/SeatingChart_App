@@ -3,23 +3,17 @@ using System.IO;
 using SeatingChartApp.Runtime.Data;
 using UnityEngine;
 using System;
+using System.Linq;
 
 namespace SeatingChartApp.Runtime.Systems
 {
-    /// <summary>
-    /// Central manager for persisting and restoring seat layouts. Now supports
-    /// a separate "default" layout file that can be explicitly saved and restored by admins.
-    /// </summary>
     public class LayoutManager : MonoBehaviour
     {
         public List<SeatController> Seats = new List<SeatController>();
         private bool _layoutDirty;
         public string CurrentAreaName = "Default";
 
-        // The file for the current, operational layout
         private string WorkingSaveFilePath => Path.Combine(Application.persistentDataPath, $"seatlayout_{CurrentAreaName}_working.json");
-
-        // 🆕 NEW: The file for the admin-defined master/default layout
         private string DefaultSaveFilePath => Path.Combine(Application.persistentDataPath, $"seatlayout_{CurrentAreaName}_default.json");
 
         private void Awake()
@@ -66,9 +60,6 @@ namespace SeatingChartApp.Runtime.Systems
             }
         }
 
-        /// <summary>
-        /// Saves the current seat layout to the working file.
-        /// </summary>
         public void SaveLayout()
         {
             var layout = CreateLayoutDataFromScene();
@@ -76,7 +67,6 @@ namespace SeatingChartApp.Runtime.Systems
             {
                 string json = JsonUtility.ToJson(layout, true);
                 File.WriteAllText(WorkingSaveFilePath, json);
-                // We don't log this every time to avoid spamming the console
             }
             catch (Exception ex)
             {
@@ -84,10 +74,6 @@ namespace SeatingChartApp.Runtime.Systems
             }
         }
 
-        /// <summary>
-        /// 🆕 NEW: Saves the current seat layout as the new default/master layout.
-        /// This is an explicit admin action.
-        /// </summary>
         public void SaveAsDefaultLayout()
         {
             var layout = CreateLayoutDataFromScene();
@@ -103,15 +89,11 @@ namespace SeatingChartApp.Runtime.Systems
             }
         }
 
-        /// <summary>
-        /// Loads the working seat layout from disk.
-        /// </summary>
         public void LoadLayout()
         {
             if (!File.Exists(WorkingSaveFilePath))
             {
-                DebugManager.Log(LogCategory.Saving, $"No working layout found for '{CurrentAreaName}'. Attempting to load default layout.");
-                ResetLayoutToDefault(); // If no working copy, start with the default
+                ResetLayoutToDefault();
                 return;
             }
 
@@ -128,23 +110,10 @@ namespace SeatingChartApp.Runtime.Systems
             }
         }
 
-        /// <summary>
-        /// 🆕 UPDATED: Resets the layout. It now loads from the default file if it exists,
-        /// otherwise it clears all seats.
-        /// </summary>
         public void ResetLayoutToDefault()
         {
-            // First, delete the current working copy
-            try
-            {
-                if (File.Exists(WorkingSaveFilePath)) File.Delete(WorkingSaveFilePath);
-            }
-            catch (Exception ex)
-            {
-                DebugManager.LogError(LogCategory.Saving, $"Could not delete working layout file during reset: {ex.Message}");
-            }
+            if (File.Exists(WorkingSaveFilePath)) try { File.Delete(WorkingSaveFilePath); } catch { }
 
-            // Now, load the default layout if it exists
             if (File.Exists(DefaultSaveFilePath))
             {
                 try
@@ -162,12 +131,9 @@ namespace SeatingChartApp.Runtime.Systems
             }
             else
             {
-                // If no default file exists, perform a hard reset
                 DebugManager.LogWarning(LogCategory.Saving, "No default layout saved. Performing hard reset to empty state.");
                 HardResetSeats();
             }
-
-            // Mark dirty to save this reset state as the new working copy
             MarkLayoutDirty();
         }
 
@@ -201,7 +167,8 @@ namespace SeatingChartApp.Runtime.Systems
                     rotation = rect != null ? rect.localEulerAngles.z : 0f,
                     state = seat.State,
                     guest = seat.CurrentGuest,
-                    capacity = seat.Capacity
+                    capacity = seat.Capacity,
+                    parentAreaName = seat.transform.parent.name // 🆕 NEW: Save the parent container's name
                 };
                 layout.seats.Add(data);
             }
@@ -212,22 +179,34 @@ namespace SeatingChartApp.Runtime.Systems
         {
             if (layout == null || layout.seats == null) return;
 
+            var areaManager = ServiceProvider.Get<AreaManager>();
+
             foreach (var data in layout.seats)
             {
+                // Find the seat in the currently managed list
                 var seat = Seats.Find(s => s != null && s.SeatID == data.seatID);
                 if (seat == null) continue;
 
                 var rect = seat.transform as RectTransform;
+
+                // 🆕 NEW: Ensure the seat is in the correct parent container
+                if (areaManager != null && !string.IsNullOrEmpty(data.parentAreaName))
+                {
+                    Transform correctParent = areaManager.areaContainers.FirstOrDefault(t => t.name == data.parentAreaName);
+                    if (correctParent != null && seat.transform.parent != correctParent)
+                    {
+                        seat.transform.SetParent(correctParent, true);
+                    }
+                }
+
                 if (rect != null)
                 {
                     rect.anchoredPosition = data.anchoredPosition;
                     rect.localEulerAngles = new Vector3(0, 0, data.rotation);
                 }
 
-                // When loading a layout, clear any existing guests
                 seat.State = SeatState.Available;
                 seat.CurrentGuest = null;
-
                 seat.Capacity = data.capacity > 0 ? data.capacity : seat.Capacity;
                 seat.UpdateVisualState();
             }
@@ -238,16 +217,12 @@ namespace SeatingChartApp.Runtime.Systems
             if (seat != null && !Seats.Contains(seat))
             {
                 Seats.Add(seat);
-                DebugManager.Log(LogCategory.Spawning, $"Seat {seat.SeatID} registered.");
             }
         }
 
         public void UnregisterSeat(SeatController seat)
         {
-            if (seat != null && Seats.Remove(seat))
-            {
-                DebugManager.Log(LogCategory.Spawning, $"Seat {seat.SeatID} unregistered.");
-            }
+            if (seat != null) Seats.Remove(seat);
         }
     }
 }

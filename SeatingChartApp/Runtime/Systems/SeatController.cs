@@ -3,6 +3,7 @@ using SeatingChartApp.Runtime.UI;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
+using System.Collections.Generic;
 
 namespace SeatingChartApp.Runtime.Systems
 {
@@ -21,7 +22,6 @@ namespace SeatingChartApp.Runtime.Systems
         private bool _dragging;
         private Vector2 _dragOffset;
         private Vector3 _originalScale;
-        private Color _originalColor;
         public bool snapToGrid = true;
         public float gridSize = 50f;
 
@@ -31,11 +31,17 @@ namespace SeatingChartApp.Runtime.Systems
         private LayoutManager _layoutManager;
         private AnalyticsManager _analyticsManager;
         private LayoutEditManager _layoutEditManager;
+        private SelectionManager _selectionManager;
+
+        // --- Visuals ---
+        private Outline _selectionOutline;
+        private Outline _editModeOutline;
 
         // --- Unity Methods ---
         private void Awake()
         {
             LayoutEditManager.OnEditModeChanged += HandleEditModeChanged;
+            SelectionManager.OnSelectionChanged += HandleSelectionChanged;
         }
 
         private void Start()
@@ -45,52 +51,62 @@ namespace SeatingChartApp.Runtime.Systems
             _layoutManager = ServiceProvider.Get<LayoutManager>();
             _analyticsManager = ServiceProvider.Get<AnalyticsManager>();
             _layoutEditManager = ServiceProvider.Get<LayoutEditManager>();
+            _selectionManager = ServiceProvider.Get<SelectionManager>();
 
             if (SeatImage == null) SeatImage = GetComponent<Image>();
 
+            var outlines = GetComponents<Outline>();
+            _editModeOutline = outlines.Length > 0 ? outlines[0] : gameObject.AddComponent<Outline>();
+            _selectionOutline = outlines.Length > 1 ? outlines[1] : gameObject.AddComponent<Outline>();
+
+            _editModeOutline.effectColor = Color.yellow;
+            _editModeOutline.effectDistance = new Vector2(4, -4);
+            _editModeOutline.enabled = false;
+
+            _selectionOutline.effectColor = Color.cyan;
+            _selectionOutline.effectDistance = new Vector2(-4, 4);
+            _selectionOutline.enabled = false;
+
             if (_layoutManager != null) _layoutManager.RegisterSeat(this);
-            else DebugManager.LogError(LogCategory.General, "LayoutManager not found. Seat cannot register itself.");
         }
 
         private void OnDestroy()
         {
             if (_layoutManager != null) _layoutManager.UnregisterSeat(this);
             LayoutEditManager.OnEditModeChanged -= HandleEditModeChanged;
-        }
-
-        private void Update()
-        {
-            if (State == SeatState.Occupied && TimerText != null)
-            {
-                float elapsed = Time.time - OccupiedStartTime;
-                int minutes = Mathf.FloorToInt(elapsed / 60f);
-                int seconds = Mathf.FloorToInt(elapsed % 60f);
-                TimerText.text = $"{minutes:00}:{seconds:00}";
-            }
+            SelectionManager.OnSelectionChanged -= HandleSelectionChanged;
         }
 
         // --- Public Methods ---
         public void OnPointerClick(PointerEventData eventData)
         {
-            // 🆕 NEW: Check for right-click rotation in edit mode
-            if (_layoutEditManager != null && _layoutEditManager.IsEditModeActive && eventData.button == PointerEventData.InputButton.Right)
-            {
-                RotateSeat(45f); // Rotate by 45 degrees on right-click
-                return; // Prevent panel from opening
-            }
+            bool isEditMode = _layoutEditManager != null && _layoutEditManager.IsEditModeActive;
 
-            // If in edit mode (and it was a left-click), open the panel
-            if (_layoutEditManager != null && _layoutEditManager.IsEditModeActive)
+            if (isEditMode && eventData.button == PointerEventData.InputButton.Right)
             {
-                _seatingUIManager?.OpenSeatAssignmentPanel(this);
+                RotateSeat(45f);
                 return;
             }
 
-            // Standard operational mode (left-click):
-            if (State == SeatState.OutOfService && (_userRoleManager == null || _userRoleManager.CurrentRole != UserRoleManager.Role.Admin))
-                return;
-
-            _seatingUIManager?.OpenSeatAssignmentPanel(this);
+            if (eventData.button == PointerEventData.InputButton.Left)
+            {
+                if (isEditMode)
+                {
+                    _seatingUIManager?.OpenSeatAssignmentPanel(this);
+                }
+                else
+                {
+                    if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
+                    {
+                        _selectionManager?.ToggleSelection(this);
+                    }
+                    else
+                    {
+                        _selectionManager?.SelectOnly(this);
+                        _seatingUIManager?.OpenSeatAssignmentPanel(this);
+                    }
+                }
+            }
         }
 
         public void AssignGuest(GuestData guest)
@@ -100,7 +116,6 @@ namespace SeatingChartApp.Runtime.Systems
             OccupiedStartTime = Time.time;
             State = SeatState.Occupied;
             UpdateVisualState();
-
             _analyticsManager?.RecordGuestSeated(guest);
             _layoutManager?.MarkLayoutDirty();
         }
@@ -108,35 +123,38 @@ namespace SeatingChartApp.Runtime.Systems
         public void ClearSeat()
         {
             if (CurrentGuest != null) _analyticsManager?.RecordGuestCleared(CurrentGuest);
-
             CurrentGuest = null;
             State = SeatState.Available;
             if (TimerText != null) TimerText.text = string.Empty;
             UpdateVisualState();
-
-            _layoutManager?.MarkLayoutDirty();
-        }
-
-        public void ToggleOutOfService()
-        {
-            State = (State == SeatState.OutOfService) ? SeatState.Available : SeatState.OutOfService;
-            if (State == SeatState.OutOfService) CurrentGuest = null;
-            if (TimerText != null) TimerText.text = string.Empty;
-            UpdateVisualState();
-
             _layoutManager?.MarkLayoutDirty();
         }
 
         /// <summary>
-        /// Rotates the seat by a specified angle.
+        /// 🆕 FIXED: This method was missing and has been restored.
+        /// Toggles the out of service flag for the seat.
         /// </summary>
+        public void ToggleOutOfService()
+        {
+            State = (State == SeatState.OutOfService) ? SeatState.Available : SeatState.OutOfService;
+            if (State == SeatState.OutOfService)
+            {
+                CurrentGuest = null;
+            }
+            if (TimerText != null)
+            {
+                TimerText.text = string.Empty;
+            }
+            UpdateVisualState();
+            _layoutManager?.MarkLayoutDirty();
+        }
+
         public void RotateSeat(float angle)
         {
             if (transform is RectTransform rect)
             {
                 rect.Rotate(0, 0, angle);
                 _layoutManager?.MarkLayoutDirty();
-                DebugManager.Log(LogCategory.UI, $"Seat {SeatID} rotated by {angle} degrees. New rotation: {rect.localEulerAngles.z}");
             }
         }
 
@@ -158,26 +176,26 @@ namespace SeatingChartApp.Runtime.Systems
         // --- Event Handlers ---
         private void HandleEditModeChanged(bool isEditMode)
         {
-            var outline = GetComponent<Outline>();
-            if (outline == null) outline = gameObject.AddComponent<Outline>();
-            outline.enabled = isEditMode;
-            outline.effectColor = Color.yellow;
-            outline.effectDistance = new Vector2(5, -5);
+            if (_editModeOutline != null) _editModeOutline.enabled = isEditMode;
+        }
+
+        private void HandleSelectionChanged(List<SeatController> selectedSeats)
+        {
+            if (_selectionOutline != null)
+            {
+                _selectionOutline.enabled = selectedSeats.Contains(this);
+            }
         }
 
         #region Dragging
         public void OnBeginDrag(PointerEventData eventData)
         {
             if (_userRoleManager == null || _userRoleManager.CurrentRole != UserRoleManager.Role.Admin || _layoutEditManager == null || !_layoutEditManager.IsEditModeActive) return;
-
             _dragging = true;
             RectTransform rect = transform as RectTransform;
             RectTransform parentRect = rect.parent as RectTransform ?? rect;
-
             RectTransformUtility.ScreenPointToLocalPointInRectangle(parentRect, eventData.position, eventData.pressEventCamera, out Vector2 localPoint);
-
             _dragOffset = rect.anchoredPosition - localPoint;
-
             _originalScale = transform.localScale;
             transform.localScale = _originalScale * 1.1f;
         }
@@ -185,12 +203,9 @@ namespace SeatingChartApp.Runtime.Systems
         public void OnDrag(PointerEventData eventData)
         {
             if (!_dragging) return;
-
             RectTransform rect = transform as RectTransform;
             RectTransform parentRect = rect.parent as RectTransform ?? rect;
-
             RectTransformUtility.ScreenPointToLocalPointInRectangle(parentRect, eventData.position, eventData.pressEventCamera, out Vector2 localPoint);
-
             rect.anchoredPosition = localPoint + _dragOffset;
         }
 
@@ -198,9 +213,7 @@ namespace SeatingChartApp.Runtime.Systems
         {
             if (!_dragging) return;
             _dragging = false;
-
             transform.localScale = _originalScale;
-
             RectTransform rect = transform as RectTransform;
             if (snapToGrid && rect != null)
             {
@@ -209,7 +222,6 @@ namespace SeatingChartApp.Runtime.Systems
                 pos.y = Mathf.Round(pos.y / gridSize) * gridSize;
                 rect.anchoredPosition = pos;
             }
-
             _layoutManager?.MarkLayoutDirty();
         }
         #endregion

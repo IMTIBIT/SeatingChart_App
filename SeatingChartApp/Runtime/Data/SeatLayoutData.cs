@@ -18,12 +18,11 @@ namespace SeatingChartApp.Runtime.Data
         public SeatState state;
         public GuestData guest;
         public int capacity;
-
-        // Prefab identifier used for restoration
         public string prefabKey;
-
-        // 🆕 NEW: Rotation data
         public float rotation;
+
+        // 🆕 NEW: Stores the name of the parent area container
+        public string parentAreaName;
     }
 
     public enum SeatState
