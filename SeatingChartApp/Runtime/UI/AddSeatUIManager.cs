@@ -5,232 +5,167 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
-namespace SeatingChartApp.Runtime.UI
+public class AddSeatUIManager : MonoBehaviour
 {
-    /// <summary>
-    /// Provides a UI for admins to add new seats to the current area.  Seats are
-    /// selected from a library of prefabs and assigned an ID/label and capacity.
-    /// </summary>
-    public class AddSeatUIManager : MonoBehaviour
+    [Header("Add Seat Panel")]
+    [SerializeField] private GameObject addSeatPanel;
+    [SerializeField] private TMP_Dropdown seatTypeDropdown;
+    [SerializeField] private TMP_InputField seatLabelInput;
+    [SerializeField] private TMP_InputField capacityInput;
+    [SerializeField] private Button addButton;
+    [SerializeField] private Button cancelButton;
+    [SerializeField] private TMP_Text errorText;
+
+    [Header("Seat Prefabs")]
+    public List<SeatPrefabData> seatPrefabs = new List<SeatPrefabData>();
+
+    private SeatController _editingSeat;
+
+    private void Awake()
     {
-        [Header("Add Seat Panel")]
-        [SerializeField] private GameObject addSeatPanel;
-        [SerializeField] private TMP_Dropdown seatTypeDropdown;
-        [SerializeField] private TMP_InputField seatLabelInput;
-        [SerializeField] private TMP_InputField capacityInput;
-        [SerializeField] private Button addButton;
-        [SerializeField] private Button cancelButton;
-        [SerializeField] private TMP_Text errorText;
+        PopulateDropdown();
+        if (addButton != null) addButton.onClick.AddListener(OnAddSeat);
+        if (cancelButton != null) cancelButton.onClick.AddListener(HidePanel);
+    }
 
-        [Header("Seat Prefabs")]
-        [Tooltip("List of seat prefabs that can be added.  Assign in the inspector.")]
-        public List<GameObject> seatPrefabs = new List<GameObject>();
-
-        // When editing an existing seat, this will point to the seat being edited.
-        private SeatController _editingSeat;
-
-        private void Awake()
+    private void PopulateDropdown()
+    {
+        seatTypeDropdown.options.Clear();
+        foreach (var prefabData in seatPrefabs)
         {
-            // Populate dropdown with prefab names
-            if (seatTypeDropdown != null)
-            {
-                seatTypeDropdown.options.Clear();
-                foreach (var prefab in seatPrefabs)
-                {
-                    seatTypeDropdown.options.Add(new TMP_Dropdown.OptionData(prefab != null ? prefab.name : "Seat"));
-                }
-                seatTypeDropdown.RefreshShownValue();
-            }
-            // Button listeners
-            if (addButton != null) addButton.onClick.AddListener(OnAddSeat);
-            if (cancelButton != null) cancelButton.onClick.AddListener(HidePanel);
+            seatTypeDropdown.options.Add(new TMP_Dropdown.OptionData(prefabData.prefabName));
+        }
+        seatTypeDropdown.RefreshShownValue();
+        seatTypeDropdown.onValueChanged.AddListener(OnSeatTypeChanged);
+        OnSeatTypeChanged(0);
+    }
+
+    private void OnSeatTypeChanged(int index)
+    {
+        if (index < 0 || index >= seatPrefabs.Count) return;
+        capacityInput.text = seatPrefabs[index].defaultCapacity.ToString();
+    }
+
+    public void ShowPanel()
+    {
+        _editingSeat = null;
+        seatTypeDropdown.interactable = true;
+        seatLabelInput.text = string.Empty;
+        errorText.text = string.Empty;
+        addSeatPanel.SetActive(true);
+    }
+
+    private void HidePanel()
+    {
+        addSeatPanel.SetActive(false);
+    }
+
+    private void OnAddSeat()
+    {
+        string label = seatLabelInput.text.Trim();
+        if (string.IsNullOrEmpty(label))
+        {
+            errorText.text = "Seat name/ID is required.";
+            return;
         }
 
-        /// <summary>
-        /// Opens the add seat panel and clears inputs.
-        /// </summary>
-        public void ShowPanel()
+        int capacity;
+        if (!int.TryParse(capacityInput.text.Trim(), out capacity) || capacity <= 0)
         {
-            // Show panel for creating a new seat
-            _editingSeat = null;
-            if (seatTypeDropdown != null && seatPrefabs.Count > 0)
-            {
-                seatTypeDropdown.value = 0;
-            }
-            if (seatLabelInput != null) seatLabelInput.text = string.Empty;
-            if (capacityInput != null) capacityInput.text = string.Empty;
-            if (errorText != null) errorText.text = string.Empty;
-            if (addSeatPanel != null) addSeatPanel.SetActive(true);
+            errorText.text = "Capacity must be positive.";
+            return;
         }
 
-        /// <summary>
-        /// Shows the panel for editing an existing seat.  Prepopulates the fields
-        /// with the seat's current ID and capacity and stores the editing seat
-        /// reference.  The seat type dropdown is not changed, because changing
-        /// prefab type after creation is not supported.
-        /// </summary>
-        /// <param name="seat">Seat to edit.</param>
-        public void ShowPanelForEditing(SeatController seat)
-        {
-            _editingSeat = seat;
-            if (_editingSeat != null)
-            {
-                // Prepopulate fields with existing values
-                if (seatLabelInput != null) seatLabelInput.text = _editingSeat.SeatID.ToString();
-                if (capacityInput != null) capacityInput.text = _editingSeat.Capacity.ToString();
-                if (errorText != null) errorText.text = string.Empty;
-            }
-            // Hide seat type dropdown when editing; we do not allow type changes
-            if (seatTypeDropdown != null) seatTypeDropdown.gameObject.SetActive(_editingSeat == null);
-            if (addSeatPanel != null) addSeatPanel.SetActive(true);
-        }
+        var selectedPrefab = seatPrefabs[seatTypeDropdown.value].prefab;
+        InstantiateSeat(selectedPrefab, label, capacity);
+        HidePanel();
+    }
 
-        /// <summary>
-        /// Hides the add seat panel.
-        /// </summary>
-        public void HidePanel()
-        {
-            if (addSeatPanel != null) addSeatPanel.SetActive(false);
-        }
+    public void AutoAddSeat(string seatLabel, int occupancy)
+    {
+        GameObject selectedPrefab = GetPrefabForOccupancy(occupancy);
+        InstantiateSeat(selectedPrefab, seatLabel, occupancy);
+    }
 
-        /// <summary>
-        /// Handler for the Add button.  Validates input, instantiates the
-        /// selected seat prefab, assigns its ID/label/capacity, and
-        /// registers it with the layout manager.
-        /// </summary>
-        private void OnAddSeat()
+    private GameObject GetPrefabForOccupancy(int occupancy)
+    {
+        foreach (var seatPrefab in seatPrefabs)
         {
-            // If we are editing an existing seat, update its properties rather than creating new
-            if (_editingSeat != null)
-            {
-                // Validate inputs
-                string newLabel = seatLabelInput != null ? seatLabelInput.text.Trim() : string.Empty;
-                if (string.IsNullOrEmpty(newLabel))
-                {
-                    if (errorText != null) errorText.text = "Seat name/ID is required.";
-                    return;
-                }
-                int newId;
-                if (!int.TryParse(newLabel, out newId))
-                {
-                    if (errorText != null) errorText.text = "Seat ID must be an integer.";
-                    return;
-                }
-                int newCap = _editingSeat.Capacity;
-                if (capacityInput != null && !string.IsNullOrWhiteSpace(capacityInput.text))
-                {
-                    if (!int.TryParse(capacityInput.text.Trim(), out newCap) || newCap <= 0)
-                    {
-                        if (errorText != null) errorText.text = "Capacity must be a positive integer.";
-                        return;
-                    }
-                }
-                // Ensure new ID is unique within current area (if changed)
-                if (LayoutManager.Instance != null)
-                {
-                    foreach (var seat in LayoutManager.Instance.Seats)
-                    {
-                        if (seat != null && seat != _editingSeat && seat.SeatID == newId)
-                        {
-                            if (errorText != null) errorText.text = "Seat ID already exists.";
-                            return;
-                        }
-                    }
-                }
-                // Apply changes
-                _editingSeat.SeatID = newId;
-                _editingSeat.Capacity = newCap;
-                _editingSeat.name = newLabel;
-                // Persist changes
-                if (LayoutManager.Instance != null)
-                {
-                    LayoutManager.Instance.MarkLayoutDirty();
-                }
-                // Clear editing state and hide panel
-                _editingSeat = null;
-                // Re-enable dropdown for next creation
-                if (seatTypeDropdown != null) seatTypeDropdown.gameObject.SetActive(true);
-                HidePanel();
-                return;
-            }
-            if (seatPrefabs == null || seatPrefabs.Count == 0)
-            {
-                if (errorText != null) errorText.text = "No seat prefabs configured.";
-                return;
-            }
-            int index = seatTypeDropdown != null ? seatTypeDropdown.value : 0;
-            if (index < 0 || index >= seatPrefabs.Count || seatPrefabs[index] == null)
-            {
-                if (errorText != null) errorText.text = "Invalid seat selection.";
-                return;
-            }
-            string label = seatLabelInput != null ? seatLabelInput.text.Trim() : string.Empty;
-            if (string.IsNullOrEmpty(label))
-            {
-                if (errorText != null) errorText.text = "Seat name/ID is required.";
-                return;
-            }
-            int capacity = 1;
-            if (capacityInput != null && !string.IsNullOrWhiteSpace(capacityInput.text))
-            {
-                if (!int.TryParse(capacityInput.text.Trim(), out capacity) || capacity <= 0)
-                {
-                    if (errorText != null) errorText.text = "Capacity must be a positive integer.";
-                    return;
-                }
-            }
-            // Ensure the seat ID (label) is unique within the current area
-            if (LayoutManager.Instance != null)
-            {
-                foreach (var seat in LayoutManager.Instance.Seats)
-                {
-                    if (seat != null && seat.SeatID.ToString().Equals(label, System.StringComparison.OrdinalIgnoreCase))
-                    {
-                        if (errorText != null) errorText.text = "Seat ID already exists.";
-                        return;
-                    }
-                }
-            }
-            // Instantiate the selected prefab
-            GameObject prefab = seatPrefabs[index];
-            Transform parent = null;
-            // Parent the new seat to the current area container if available
-            if (AreaManager.Instance != null)
-            {
-                parent = AreaManager.Instance.GetCurrentAreaContainer();
-            }
-            if (parent == null)
-            {
-                // Fallback to this manager's transform if no area is active
-                parent = transform;
-            }
-            GameObject newSeatObj = Instantiate(prefab, parent);
-            newSeatObj.name = label;
-            SeatController seatController = newSeatObj.GetComponent<SeatController>();
-            if (seatController != null)
-            {
-                seatController.SeatID = TryParseSeatId(label);
-                seatController.Capacity = capacity;
-                seatController.UpdateVisualState();
-            }
-            // Register with the LayoutManager
-            if (LayoutManager.Instance != null)
-            {
-                LayoutManager.Instance.RegisterSeat(seatController);
-                LayoutManager.Instance.MarkLayoutDirty();
-            }
-            HidePanel();
+            if (seatPrefab.defaultCapacity >= occupancy)
+                return seatPrefab.prefab;
         }
+        return seatPrefabs[seatPrefabs.Count - 1].prefab;
+    }
 
-        /// <summary>
-        /// Helper to parse a seat ID from the label.  Falls back to a hash code
-        /// if parsing fails.  Seat IDs should ideally be integers.
-        /// </summary>
-        private int TryParseSeatId(string label)
+    private void InstantiateSeat(GameObject prefab, string label, int capacity)
+    {
+        var parent = AreaManager.Instance.GetCurrentAreaContainer() ?? transform;
+        var newSeatObj = Instantiate(prefab, parent);
+        newSeatObj.name = label;
+
+        var seatController = newSeatObj.GetComponent<SeatController>();
+        seatController.SeatID = TryParseSeatId(label);
+        seatController.Capacity = capacity;
+        seatController.UpdateVisualState();
+
+        LayoutManager.Instance.RegisterSeat(seatController);
+        LayoutManager.Instance.MarkLayoutDirty();
+    }
+
+    public void AddChair()
+    {
+        int chairCapacity = 1;
+        string label = $"Chair_{Random.Range(1000, 9999)}";
+        GameObject chairPrefab = GetPrefabForExactCapacity(chairCapacity);
+
+        if (chairPrefab != null)
         {
-            if (int.TryParse(label, out int id))
-                return id;
-            return label.GetHashCode();
+            InstantiateSeat(chairPrefab, label, chairCapacity);
+        }
+        else
+        {
+            Debug.LogWarning("No chair prefab with capacity 1 found.");
         }
     }
+
+    public void AddTable()
+    {
+        int tableCapacity = 4;
+        string label = $"Table_{Random.Range(1000, 9999)}";
+        GameObject tablePrefab = GetPrefabForExactCapacity(tableCapacity);
+
+        if (tablePrefab != null)
+        {
+            InstantiateSeat(tablePrefab, label, tableCapacity);
+        }
+        else
+        {
+            Debug.LogWarning("No table prefab with capacity 4 found.");
+        }
+    }
+
+    private GameObject GetPrefabForExactCapacity(int capacity)
+    {
+        foreach (var seatPrefab in seatPrefabs)
+        {
+            if (seatPrefab.defaultCapacity == capacity)
+                return seatPrefab.prefab;
+        }
+        return null;
+    }
+
+
+    private int TryParseSeatId(string label)
+    {
+        if (int.TryParse(label, out int id)) return id;
+        return label.GetHashCode();
+    }
+}
+
+[System.Serializable]
+public class SeatPrefabData
+{
+    public string prefabName;
+    public GameObject prefab;
+    public int defaultCapacity;
 }

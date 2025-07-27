@@ -1,6 +1,7 @@
 using SeatingChartApp.Runtime.Data;
 using SeatingChartApp.Runtime.Systems;
 using System;
+using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
@@ -322,7 +323,7 @@ namespace SeatingChartApp.Runtime.UI
                 return;
             if (addSeatUIManager != null)
             {
-                addSeatUIManager.ShowPanelForEditing(_currentSeat);
+                addSeatUIManager.seatPrefabs = new List<SeatPrefabData>();
             }
             ClosePanel();
         }
