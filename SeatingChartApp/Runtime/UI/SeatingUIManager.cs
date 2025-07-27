@@ -1,24 +1,13 @@
-using SeatingChartApp.Runtime.Data;
+﻿using SeatingChartApp.Runtime.Data;
 using SeatingChartApp.Runtime.Systems;
-using System;
-using System.Collections.Generic;
 using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
 namespace SeatingChartApp.Runtime.UI
 {
-    /// <summary>
-    /// Handles all seat assignment user interface.  Presents a panel for
-    /// entering guest details, validates input, and applies assignments
-    /// through the SeatController.  Also exposes buttons for clearing seats
-    /// and toggling out‑of‑service status.  Uses a simple singleton for
-    /// access from SeatController.
-    /// </summary>
     public class SeatingUIManager : MonoBehaviour
     {
-        public static SeatingUIManager Instance { get; private set; }
-
         [Header("Assignment Panel References")]
         [SerializeField] private GameObject assignmentPanel;
         [SerializeField] private TMP_Text seatHeaderText;
@@ -33,75 +22,73 @@ namespace SeatingChartApp.Runtime.UI
         [SerializeField] private Button clearButton;
         [SerializeField] private Button outOfServiceButton;
         [SerializeField] private TMP_Text feedbackText;
-        [SerializeField] private Button deleteButton;
 
-        [Header("Edit Seat")]
-        [SerializeField] private Button editSeatButton;
-        [SerializeField] private AddSeatUIManager addSeatUIManager;
+        [Header("Layout Edit Mode Buttons")]
+        [SerializeField] private Button deleteButton;
+        [SerializeField] private Button rotateButton;
 
         [Header("Overlay")]
         [SerializeField] private GameObject overlay;
 
-        // Currently selected seat for editing
         private SeatController _currentSeat;
+
+        private UserRoleManager _userRoleManager;
+        private LayoutManager _layoutManager;
+        private LayoutEditManager _layoutEditManager;
 
         private void Awake()
         {
-            if (Instance != null && Instance != this)
-            {
-                Destroy(gameObject);
-                return;
-            }
-            Instance = this;
+            ServiceProvider.Register(this);
             DontDestroyOnLoad(gameObject);
 
-            // Hook up button listeners
             if (assignButton != null) assignButton.onClick.AddListener(OnAssignGuest);
             if (cancelButton != null) cancelButton.onClick.AddListener(ClosePanel);
             if (clearButton != null) clearButton.onClick.AddListener(OnClearSeat);
             if (outOfServiceButton != null) outOfServiceButton.onClick.AddListener(OnToggleOutOfService);
             if (deleteButton != null) deleteButton.onClick.AddListener(OnDeleteSeat);
+            if (rotateButton != null) rotateButton.onClick.AddListener(OnRotateSeat);
 
-            if (editSeatButton != null) editSeatButton.onClick.AddListener(OnEditSeat);
-
-            // Input field validation
             if (firstNameInput != null) firstNameInput.onValueChanged.AddListener(_ => ValidateInputs());
             if (lastNameInput != null) lastNameInput.onValueChanged.AddListener(_ => ValidateInputs());
             if (roomNumberInput != null) roomNumberInput.onValueChanged.AddListener(_ => ValidateInputs());
             if (partySizeInput != null) partySizeInput.onValueChanged.AddListener(_ => ValidateInputs());
         }
 
-        /// <summary>
-        /// Opens the assignment panel for the specified seat.  Populates
-        /// fields based on the seat's current state and occupant.  Only
-        /// attendants and admins may call this method; additional role
-        /// filtering is handled in SeatController.
-        /// </summary>
+        private void Start()
+        {
+            _userRoleManager = ServiceProvider.Get<UserRoleManager>();
+            _layoutManager = ServiceProvider.Get<LayoutManager>();
+            _layoutEditManager = ServiceProvider.Get<LayoutEditManager>();
+        }
+
+        private void OnDestroy()
+        {
+            ServiceProvider.Unregister<SeatingUIManager>();
+        }
+
         public void OpenSeatAssignmentPanel(SeatController seat)
         {
-            if (seat == null)
-                return;
-            // Close any existing panel before opening a new one
+            if (seat == null) return;
+
             ClosePanel();
             _currentSeat = seat;
-            if (assignmentPanel != null)
-            {
-                assignmentPanel.SetActive(true);
-            }
-            // Activate overlay to allow tap‑outside dismissal
-            if (overlay != null)
-            {
-                overlay.SetActive(true);
-            }
-            // Update header text
-            if (seatHeaderText != null)
-            {
-                seatHeaderText.text = $"Seat {seat.SeatID}";
-            }
-            // Populate fields
+
+            if (assignmentPanel != null) assignmentPanel.SetActive(true);
+            if (overlay != null) overlay.SetActive(true);
+            if (seatHeaderText != null) seatHeaderText.text = $"Seat {seat.SeatID}";
+
+            PopulateFieldsFromSeat(seat);
+            UpdatePanelButtons(seat);
+            ValidateInputs();
+        }
+
+        private void PopulateFieldsFromSeat(SeatController seat)
+        {
+            bool isEditMode = _layoutEditManager != null && _layoutEditManager.IsEditModeActive;
+            if (isEditMode) return;
+
             if (seat.CurrentGuest != null)
             {
-                // Display existing guest details
                 if (firstNameInput != null) firstNameInput.text = seat.CurrentGuest.FirstName;
                 if (lastNameInput != null) lastNameInput.text = seat.CurrentGuest.LastName;
                 if (roomNumberInput != null) roomNumberInput.text = seat.CurrentGuest.RoomNumber;
@@ -111,7 +98,6 @@ namespace SeatingChartApp.Runtime.UI
             }
             else
             {
-                // Clear fields for new entry
                 if (firstNameInput != null) firstNameInput.text = string.Empty;
                 if (lastNameInput != null) lastNameInput.text = string.Empty;
                 if (roomNumberInput != null) roomNumberInput.text = string.Empty;
@@ -119,50 +105,53 @@ namespace SeatingChartApp.Runtime.UI
                 if (guestIdInput != null) guestIdInput.text = string.Empty;
                 if (notesInput != null) notesInput.text = string.Empty;
             }
-            // Update clear button text
-            if (clearButton != null)
+        }
+
+        private void UpdatePanelButtons(SeatController seat)
+        {
+            bool isAdmin = _userRoleManager != null && _userRoleManager.CurrentRole == UserRoleManager.Role.Admin;
+            bool isEditMode = _layoutEditManager != null && _layoutEditManager.IsEditModeActive;
+
+            SetGuestFieldsActive(!isEditMode);
+
+            if (deleteButton != null) deleteButton.gameObject.SetActive(isAdmin && isEditMode);
+            if (rotateButton != null) rotateButton.gameObject.SetActive(isAdmin && isEditMode);
+            if (clearButton != null) clearButton.gameObject.SetActive(seat.CurrentGuest != null && !isEditMode);
+            if (outOfServiceButton != null) outOfServiceButton.gameObject.SetActive(isAdmin && !isEditMode);
+
+            if (outOfServiceButton != null && outOfServiceButton.gameObject.activeSelf)
             {
-                clearButton.gameObject.SetActive(seat.CurrentGuest != null);
-            }
-            // Update out of service button text
-            if (outOfServiceButton != null)
-            {
-                outOfServiceButton.gameObject.SetActive(UserRoleManager.Instance != null && UserRoleManager.Instance.CurrentRole == UserRoleManager.Role.Admin);
                 string label = seat.State == SeatState.OutOfService ? "Restore Seat" : "Out of Service";
                 TMP_Text btnText = outOfServiceButton.GetComponentInChildren<TMP_Text>();
                 if (btnText != null) btnText.text = label;
             }
-            // Hide feedback
-            if (feedbackText != null) feedbackText.text = string.Empty;
-            // Show or hide delete button (only admins and when seat is empty)
-            if (deleteButton != null)
-            {
-                bool canDelete = (UserRoleManager.Instance != null && UserRoleManager.Instance.CurrentRole == UserRoleManager.Role.Admin && seat.CurrentGuest == null);
-                deleteButton.gameObject.SetActive(canDelete);
-            }
 
-            // Show or hide edit seat button (only admins)
-            if (editSeatButton != null)
-            {
-                bool canEdit = (UserRoleManager.Instance != null && UserRoleManager.Instance.CurrentRole == UserRoleManager.Role.Admin);
-                editSeatButton.gameObject.SetActive(canEdit);
-            }
-            ValidateInputs();
+            if (feedbackText != null) feedbackText.text = string.Empty;
         }
 
-        /// <summary>
-        /// Validates the input fields and toggles the assign button
-        /// accordingly.  Ensures required fields are not empty and party
-        /// size is a positive integer within capacity.
-        /// </summary>
+        private void SetGuestFieldsActive(bool isActive)
+        {
+            if (firstNameInput != null) firstNameInput.transform.parent.gameObject.SetActive(isActive);
+            if (lastNameInput != null) lastNameInput.transform.parent.gameObject.SetActive(isActive);
+            if (roomNumberInput != null) roomNumberInput.transform.parent.gameObject.SetActive(isActive);
+            if (partySizeInput != null) partySizeInput.transform.parent.gameObject.SetActive(isActive);
+            if (guestIdInput != null) guestIdInput.transform.parent.gameObject.SetActive(isActive);
+            if (notesInput != null) notesInput.transform.parent.gameObject.SetActive(isActive);
+            if (assignButton != null) assignButton.gameObject.SetActive(isActive);
+        }
+
         private bool ValidateInputs()
         {
-            bool isValid = true;
-            if (_currentSeat == null)
+            bool isEditMode = _layoutEditManager != null && _layoutEditManager.IsEditModeActive;
+            if (isEditMode)
             {
-                isValid = false;
+                if (assignButton != null) assignButton.interactable = false;
+                return false;
             }
-            // Basic string checks
+
+            bool isValid = true;
+            if (_currentSeat == null) isValid = false;
+
             if (string.IsNullOrWhiteSpace(firstNameInput?.text) ||
                 string.IsNullOrWhiteSpace(lastNameInput?.text) ||
                 string.IsNullOrWhiteSpace(roomNumberInput?.text) ||
@@ -170,68 +159,34 @@ namespace SeatingChartApp.Runtime.UI
             {
                 isValid = false;
             }
-            // Ensure room number contains only digits
-            if (!string.IsNullOrWhiteSpace(roomNumberInput?.text))
-            {
-                foreach (char c in roomNumberInput.text)
-                {
-                    if (!char.IsDigit(c))
-                    {
-                        isValid = false;
-                        break;
-                    }
-                }
-            }
-            // Party size numeric check
-            int size = 0;
-            if (!int.TryParse(partySizeInput?.text, out size) || size <= 0)
+
+            if (!int.TryParse(partySizeInput?.text, out int size) || size <= 0)
             {
                 isValid = false;
             }
-            // Capacity check
+
             if (_currentSeat != null && size > _currentSeat.Capacity)
             {
                 isValid = false;
-                if (feedbackText != null)
-                {
-                    feedbackText.text = $"Party exceeds capacity ({_currentSeat.Capacity}).";
-                }
+                if (feedbackText != null) feedbackText.text = $"Party exceeds capacity ({_currentSeat.Capacity}).";
             }
-            else
+            else if (isValid)
             {
-                if (feedbackText != null)
-                {
-                    feedbackText.text = string.Empty;
-                }
+                if (feedbackText != null) feedbackText.text = string.Empty;
             }
-            // Disable assign when seat is out of service
-            if (_currentSeat != null && _currentSeat.State == SeatState.OutOfService)
-            {
-                isValid = false;
-            }
-            if (assignButton != null)
-            {
-                assignButton.interactable = isValid;
-            }
+
+            if (_currentSeat != null && _currentSeat.State == SeatState.OutOfService) isValid = false;
+            if (assignButton != null) assignButton.interactable = isValid;
+
             return isValid;
         }
 
-        /// <summary>
-        /// Called when the assign button is pressed.  Validates input one
-        /// more time and if valid creates a new GuestData record and
-        /// assigns it to the seat.  Persists the layout change and closes
-        /// the panel.
-        /// </summary>
+        // --- Button Handlers ---
         private void OnAssignGuest()
         {
-            if (_currentSeat == null)
-                return;
-            if (!ValidateInputs())
-            {
-                // Prevent assignment if invalid
-                return;
-            }
-            int size = int.Parse(partySizeInput.text);
+            if (_currentSeat == null || !ValidateInputs()) return;
+
+            int.TryParse(partySizeInput.text, out int size);
             var guest = new GuestData(
                 firstNameInput.text.Trim(),
                 lastNameInput.text.Trim(),
@@ -239,110 +194,50 @@ namespace SeatingChartApp.Runtime.UI
                 size,
                 guestIdInput != null ? guestIdInput.text.Trim() : string.Empty,
                 notesInput != null ? notesInput.text.Trim() : string.Empty);
+
             _currentSeat.AssignGuest(guest);
-            // Mark layout as dirty so it saves immediately
-            if (LayoutManager.Instance != null)
-            {
-                LayoutManager.Instance.MarkLayoutDirty();
-            }
+            _layoutManager?.MarkLayoutDirty();
             ClosePanel();
         }
 
-        /// <summary>
-        /// Clears the current seat's guest assignment.  Only shown when
-        /// editing an occupied seat.  Persists the layout change.
-        /// </summary>
         private void OnClearSeat()
         {
-            if (_currentSeat == null)
-                return;
+            if (_currentSeat == null) return;
             _currentSeat.ClearSeat();
-            if (LayoutManager.Instance != null)
-            {
-                LayoutManager.Instance.MarkLayoutDirty();
-            }
+            _layoutManager?.MarkLayoutDirty();
             ClosePanel();
         }
 
-        /// <summary>
-        /// Toggles the current seat's out‑of‑service state.  Only available
-        /// for admins.  Persists the layout change and closes the panel.
-        /// </summary>
         private void OnToggleOutOfService()
         {
-            if (_currentSeat == null)
-                return;
+            if (_currentSeat == null) return;
             _currentSeat.ToggleOutOfService();
-            if (LayoutManager.Instance != null)
-            {
-                LayoutManager.Instance.MarkLayoutDirty();
-            }
+            _layoutManager?.MarkLayoutDirty();
             ClosePanel();
         }
 
-        /// <summary>
-        /// Deletes the current seat from the layout and the scene.  Only available
-        /// for admins and when the seat is empty.  Removes the seat from the
-        /// LayoutManager and destroys the GameObject.
-        /// </summary>
         private void OnDeleteSeat()
         {
-            if (_currentSeat == null)
-                return;
-            // Ensure we are in admin mode and seat is not occupied
-            if (UserRoleManager.Instance == null || UserRoleManager.Instance.CurrentRole != UserRoleManager.Role.Admin)
-                return;
-            if (_currentSeat.CurrentGuest != null)
-            {
-                if (feedbackText != null)
-                {
-                    feedbackText.text = "Cannot delete an occupied seat.";
-                }
-                return;
-            }
-            // Unregister from layout
-            if (LayoutManager.Instance != null)
-            {
-                LayoutManager.Instance.UnregisterSeat(_currentSeat);
-                LayoutManager.Instance.MarkLayoutDirty();
-            }
-            // Destroy the seat
+            if (_currentSeat == null) return;
+            if (_userRoleManager == null || _userRoleManager.CurrentRole != UserRoleManager.Role.Admin) return;
+
+            _layoutManager?.UnregisterSeat(_currentSeat);
             Destroy(_currentSeat.gameObject);
+            _layoutManager?.MarkLayoutDirty();
             ClosePanel();
         }
 
-        /// <summary>
-        /// Opens the add seat UI manager in edit mode for the current seat.  Only
-        /// available to admins.  Closes the assignment panel when invoked.
-        /// </summary>
-        private void OnEditSeat()
+        private void OnRotateSeat()
         {
-            if (_currentSeat == null)
-                return;
-            if (UserRoleManager.Instance == null || UserRoleManager.Instance.CurrentRole != UserRoleManager.Role.Admin)
-                return;
-            if (addSeatUIManager != null)
-            {
-                addSeatUIManager.seatPrefabs = new List<SeatPrefabData>();
-            }
-            ClosePanel();
+            if (_currentSeat == null) return;
+            // The UI button will rotate by a standard 90 degrees
+            _currentSeat.RotateSeat(90f);
         }
 
-        /// <summary>
-        /// Hides the assignment panel and clears the selected seat reference.
-        /// Input fields are not cleared here; they will be overwritten the
-        /// next time the panel opens.
-        /// </summary>
         public void ClosePanel()
         {
-            if (assignmentPanel != null)
-            {
-                assignmentPanel.SetActive(false);
-            }
-            if (overlay != null)
-            {
-                overlay.SetActive(false);
-            }
+            if (assignmentPanel != null) assignmentPanel.SetActive(false);
+            if (overlay != null) overlay.SetActive(false);
             _currentSeat = null;
         }
     }

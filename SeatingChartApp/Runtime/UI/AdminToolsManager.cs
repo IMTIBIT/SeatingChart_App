@@ -1,171 +1,178 @@
-using SeatingChartApp.Runtime.Systems;
+﻿using SeatingChartApp.Runtime.Systems;
 using UnityEngine;
 using UnityEngine.UI;
+using TMPro;
 
 namespace SeatingChartApp.Runtime.UI
 {
-    /// <summary>
-    /// Provides a set of admin‑only tools accessible via the UI.  Buttons
-    /// exposed here trigger functions such as resetting the layout to its
-    /// default state or switching roles quickly for testing.  Attach this
-    /// component to a GameObject in your scene and assign the button
-    /// references in the inspector.
-    /// </summary>
     public class AdminToolsManager : MonoBehaviour
     {
         [Header("Admin Buttons")]
         [SerializeField] private Button resetLayoutButton;
         [SerializeField] private Button roleSwitchButton;
+        [SerializeField] private Button layoutEditButton;
+        [SerializeField] private Button saveDefaultLayoutButton;
+        [SerializeField] private Button exportDataButton;
+        [SerializeField] private Button endOfDayButton; // 🆕 NEW
 
-        [SerializeField] private Button addSeatButton;
-        [Header("Add Seat UI Manager")]
-        [SerializeField] private AddSeatUIManager addSeatUIManager;
+        [Header("UI Panels")]
+        [SerializeField] private GameObject endOfDayConfirmationPanel; // 🆕 NEW
 
         [Header("Search & Filter Controls")]
-        [SerializeField] private TMPro.TMP_InputField searchInput;
+        [SerializeField] private TMP_InputField searchInput;
         [SerializeField] private Button searchButton;
-        [SerializeField] private TMPro.TMP_Dropdown filterDropdown;
+        [SerializeField] private TMP_Dropdown filterDropdown;
+
+        [Header("Analytics Display")]
+        [SerializeField] private GameObject analyticsPanel;
+        [SerializeField] private TMP_Text totalGuestsText;
+        [SerializeField] private TMP_Text avgStayText;
+
+        private UserRoleManager _userRoleManager;
+        private LayoutManager _layoutManager;
+        private LayoutEditManager _layoutEditManager;
+        private AnalyticsManager _analyticsManager;
+        private SessionManager _sessionManager; // 🆕 NEW
 
         private void Awake()
         {
-            if (resetLayoutButton != null)
-            {
-                resetLayoutButton.onClick.AddListener(OnResetLayout);
-            }
-            if (roleSwitchButton != null)
-            {
-                roleSwitchButton.onClick.AddListener(OnRoleSwitch);
-            }
-            if (addSeatButton != null)
-            {
-                addSeatButton.onClick.AddListener(OnAddSeat);
-            }
+            ServiceProvider.Register(this);
 
-            // Search and filter listeners
-            if (searchButton != null)
-            {
-                searchButton.onClick.AddListener(OnSearch);
-            }
-            if (filterDropdown != null)
-            {
-                filterDropdown.onValueChanged.AddListener(OnFilterChanged);
-            }
-
-            // Subscribe to role changes to update button visibility
-            if (UserRoleManager.Instance != null)
-            {
-                UserRoleManager.Instance.OnRoleChanged += HandleRoleChanged;
-            }
-            // Initialize button visibility
-            HandleRoleChanged(UserRoleManager.Instance != null ? UserRoleManager.Instance.CurrentRole : UserRoleManager.Role.Attendant);
+            if (resetLayoutButton != null) resetLayoutButton.onClick.AddListener(OnResetLayout);
+            if (roleSwitchButton != null) roleSwitchButton.onClick.AddListener(OnRoleSwitch);
+            if (layoutEditButton != null) layoutEditButton.onClick.AddListener(OnLayoutEdit);
+            if (saveDefaultLayoutButton != null) saveDefaultLayoutButton.onClick.AddListener(OnSaveDefaultLayout);
+            if (exportDataButton != null) exportDataButton.onClick.AddListener(OnExportData);
+            if (endOfDayButton != null) endOfDayButton.onClick.AddListener(OnEndOfDayClicked); // 🆕 NEW
+            if (searchButton != null) searchButton.onClick.AddListener(OnSearch);
+            if (filterDropdown != null) filterDropdown.onValueChanged.AddListener(OnFilterChanged);
         }
 
-        /// <summary>
-        /// Invoked when the reset layout button is pressed.  Delegates to
-        /// the LayoutManager to delete the saved layout and restore all
-        /// seats to their default positions.  Only functions for admins.
-        /// </summary>
+        private void Start()
+        {
+            _userRoleManager = ServiceProvider.Get<UserRoleManager>();
+            _layoutManager = ServiceProvider.Get<LayoutManager>();
+            _layoutEditManager = ServiceProvider.Get<LayoutEditManager>();
+            _analyticsManager = ServiceProvider.Get<AnalyticsManager>();
+            _sessionManager = ServiceProvider.Get<SessionManager>(); // 🆕 NEW
+
+            if (_userRoleManager != null)
+            {
+                _userRoleManager.OnRoleChanged += HandleRoleChanged;
+                HandleRoleChanged(_userRoleManager.CurrentRole);
+            }
+
+            AnalyticsManager.OnAnalyticsUpdated += UpdateAnalyticsDisplay;
+            UpdateAnalyticsDisplay();
+        }
+
+        private void OnDestroy()
+        {
+            if (_userRoleManager != null) _userRoleManager.OnRoleChanged -= HandleRoleChanged;
+            AnalyticsManager.OnAnalyticsUpdated -= UpdateAnalyticsDisplay;
+            ServiceProvider.Unregister<AdminToolsManager>();
+        }
+
+        private void OnEndOfDayClicked()
+        {
+            if (endOfDayConfirmationPanel != null)
+            {
+                endOfDayConfirmationPanel.SetActive(true);
+            }
+        }
+
+        public void ConfirmEndOfDay()
+        {
+            if (endOfDayConfirmationPanel != null) endOfDayConfirmationPanel.SetActive(false);
+            _sessionManager?.RunEndOfDayProcess();
+        }
+
+        public void CancelEndOfDay()
+        {
+            if (endOfDayConfirmationPanel != null) endOfDayConfirmationPanel.SetActive(false);
+        }
+
         private void OnResetLayout()
         {
-            if (UserRoleManager.Instance == null || UserRoleManager.Instance.CurrentRole != UserRoleManager.Role.Admin)
-                return;
-            if (LayoutManager.Instance != null)
-            {
-                LayoutManager.Instance.ResetLayout();
-            }
+            if (_userRoleManager == null || _userRoleManager.CurrentRole != UserRoleManager.Role.Admin) return;
+            _layoutManager?.ResetLayoutToDefault();
         }
 
-        /// <summary>
-        /// Toggles between Admin and Attendant roles.  Useful for rapid
-        /// testing when building the UI.  Note that in production builds
-        /// this functionality should be removed or secured.
-        /// </summary>
         private void OnRoleSwitch()
         {
-            if (UserRoleManager.Instance == null)
-                return;
-            var manager = UserRoleManager.Instance;
-            var newRole = manager.CurrentRole == UserRoleManager.Role.Admin ? UserRoleManager.Role.Attendant : UserRoleManager.Role.Admin;
-            manager.SetRole(newRole);
+            _userRoleManager?.ToggleRole();
         }
 
-        /// <summary>
-        /// Opens the Add Seat panel for admins.  Only functions when the
-        /// current role is Admin.  Delegates to AddSeatUIManager.ShowPanel().
-        /// </summary>
-        private void OnAddSeat()
+        private void OnLayoutEdit()
         {
-            if (UserRoleManager.Instance == null || UserRoleManager.Instance.CurrentRole != UserRoleManager.Role.Admin)
-                return;
-            if (addSeatUIManager != null)
-            {
-                addSeatUIManager.ShowPanel();
-            }
+            _layoutEditManager?.ToggleEditMode();
         }
 
-        /// <summary>
-        /// Adjusts the visibility of admin‑only buttons when the role changes.
-        /// Ensures that reset, add seat and role switch buttons are only
-        /// interactable when in admin mode.
-        /// </summary>
-        /// <param name="role">The new active role.</param>
+        private void OnSaveDefaultLayout()
+        {
+            if (_userRoleManager == null || _userRoleManager.CurrentRole != UserRoleManager.Role.Admin) return;
+            if (_layoutEditManager != null && _layoutEditManager.IsEditModeActive)
+            {
+                DebugManager.LogWarning(LogCategory.UI, "Please exit Layout Edit Mode before saving the default layout.");
+                return;
+            }
+            _layoutManager?.SaveAsDefaultLayout();
+        }
+
+        private void OnExportData()
+        {
+            if (_userRoleManager == null || _userRoleManager.CurrentRole != UserRoleManager.Role.Admin) return;
+            _analyticsManager?.ExportSessionToCSV();
+        }
+
+        private void UpdateAnalyticsDisplay()
+        {
+            if (_analyticsManager == null) return;
+            if (totalGuestsText != null) totalGuestsText.text = $"Total Guests Today: {_analyticsManager.TotalGuestsToday}";
+            if (avgStayText != null) avgStayText.text = $"Avg. Stay: {_analyticsManager.AverageStayDurationMinutes:F1} min";
+        }
+
         private void HandleRoleChanged(UserRoleManager.Role role)
         {
             bool isAdmin = role == UserRoleManager.Role.Admin;
             if (resetLayoutButton != null) resetLayoutButton.gameObject.SetActive(isAdmin);
-            if (roleSwitchButton != null) roleSwitchButton.gameObject.SetActive(true); // always show role switch for testing
-            if (addSeatButton != null) addSeatButton.gameObject.SetActive(isAdmin);
-            // Search and filter controls are admin-only
+            if (roleSwitchButton != null) roleSwitchButton.gameObject.SetActive(true);
+            if (layoutEditButton != null) layoutEditButton.gameObject.SetActive(isAdmin);
+            if (saveDefaultLayoutButton != null) saveDefaultLayoutButton.gameObject.SetActive(isAdmin);
+            if (exportDataButton != null) exportDataButton.gameObject.SetActive(isAdmin);
+            if (endOfDayButton != null) endOfDayButton.gameObject.SetActive(isAdmin); // 🆕 NEW
             if (searchInput != null) searchInput.gameObject.SetActive(isAdmin);
             if (searchButton != null) searchButton.gameObject.SetActive(isAdmin);
             if (filterDropdown != null) filterDropdown.gameObject.SetActive(isAdmin);
+            if (analyticsPanel != null) analyticsPanel.SetActive(isAdmin);
         }
 
-        /// <summary>
-        /// Searches seats for the provided query.  Highlights matching seats by
-        /// temporarily tinting their colour.  Clears previous highlights when
-        /// the search field is empty.
-        /// </summary>
         private void OnSearch()
         {
-            if (LayoutManager.Instance == null)
-                return;
+            if (_layoutManager == null) return;
             string query = searchInput != null ? searchInput.text.Trim().ToLowerInvariant() : string.Empty;
-            foreach (var seat in LayoutManager.Instance.Seats)
+            foreach (var seat in _layoutManager.Seats)
             {
                 if (seat == null) continue;
-                // Reset to default colours
                 seat.UpdateVisualState();
-                if (string.IsNullOrEmpty(query))
-                    continue;
+                if (string.IsNullOrEmpty(query)) continue;
                 bool match = false;
-                // Check seat ID
                 if (seat.SeatID.ToString().ToLowerInvariant().Contains(query)) match = true;
-                // Check current guest details
                 if (seat.CurrentGuest != null)
                 {
-                    if (!string.IsNullOrEmpty(seat.CurrentGuest.FirstName) && seat.CurrentGuest.FirstName.ToLowerInvariant().Contains(query)) match = true;
-                    if (!string.IsNullOrEmpty(seat.CurrentGuest.LastName) && seat.CurrentGuest.LastName.ToLowerInvariant().Contains(query)) match = true;
-                    if (!string.IsNullOrEmpty(seat.CurrentGuest.RoomNumber) && seat.CurrentGuest.RoomNumber.ToLowerInvariant().Contains(query)) match = true;
+                    if (seat.CurrentGuest.FirstName.ToLowerInvariant().Contains(query)) match = true;
+                    if (seat.CurrentGuest.LastName.ToLowerInvariant().Contains(query)) match = true;
+                    if (seat.CurrentGuest.RoomNumber.ToLowerInvariant().Contains(query)) match = true;
                 }
-                if (match && seat.SeatImage != null)
-                {
-                    // Lighten the seat colour to indicate a match
-                    seat.SeatImage.color = Color.cyan;
-                }
+                if (match && seat.SeatImage != null) seat.SeatImage.color = Color.cyan;
             }
         }
 
-        /// <summary>
-        /// Filters seats by their current state.  Only shows seats matching
-        /// the selected state or all seats if "All" is chosen.
-        /// </summary>
         private void OnFilterChanged(int index)
         {
-            if (LayoutManager.Instance == null || filterDropdown == null)
-                return;
+            if (_layoutManager == null || filterDropdown == null) return;
             string selected = filterDropdown.options[index].text;
-            foreach (var seat in LayoutManager.Instance.Seats)
+            foreach (var seat in _layoutManager.Seats)
             {
                 if (seat == null) continue;
                 bool visible = true;

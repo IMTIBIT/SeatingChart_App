@@ -1,53 +1,44 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using SeatingChartApp.Runtime.UI;
+using SeatingChartApp.Runtime.Systems;
 using TMPro;
 using UnityEngine;
 
 namespace SeatingChartApp.Runtime.Systems
 {
     /// <summary>
-    /// Manages multiple seating areas (e.g. Pool, Waterpark).  Each area is
-    /// represented by a container transform holding that area's seats.  When
-    /// the selected area changes, all other areas are deactivated, the
-    /// LayoutManager is updated with the new seat list and the layout is loaded
-    /// from an area‑specific file.  The area dropdown is automatically
-    /// populated from the list of area names.
+    /// Manages multiple seating areas (e.g. Pool, Waterpark). It has been
+    /// updated to use the ServiceProvider and expose the current area name.
     /// </summary>
     public class AreaManager : MonoBehaviour
     {
-        // Singleton instance for easy access from other systems
-        public static AreaManager Instance { get; private set; }
         [Tooltip("Dropdown used to select the active seating area.")]
         public TMP_Dropdown areaDropdown;
 
         [Tooltip("List of names representing each area in the same order as areaContainers.")]
         public List<string> areaNames = new List<string>();
 
-        [Tooltip("Parent transforms for each seating area.  Each should contain the seat instances for that area.")]
+        [Tooltip("Parent transforms for each seating area. Each should contain the seat instances for that area.")]
         public List<Transform> areaContainers = new List<Transform>();
 
-        // Index of the currently active area
+        // 🆕 NEW: Public property to get the name of the current area.
+        public string CurrentAreaName { get; private set; }
+
         private int _currentAreaIndex = -1;
+        private LayoutManager _layoutManager;
 
         private void Awake()
         {
-            // Setup singleton instance
-            if (Instance != null && Instance != this)
-            {
-                Destroy(gameObject);
-                return;
-            }
-            Instance = this;
+            ServiceProvider.Register(this);
             DontDestroyOnLoad(gameObject);
         }
 
-        private LayoutManager _layoutManager;
-
         private void Start()
         {
-            _layoutManager = LayoutManager.Instance;
+            _layoutManager = ServiceProvider.Get<LayoutManager>();
+
             PopulateDropdown();
-            // Activate first area by default if available
+
             if (areaNames.Count > 0)
             {
                 SwitchArea(0);
@@ -58,9 +49,11 @@ namespace SeatingChartApp.Runtime.Systems
             }
         }
 
-        /// <summary>
-        /// Populates the dropdown options with the provided area names.
-        /// </summary>
+        private void OnDestroy()
+        {
+            ServiceProvider.Unregister<AreaManager>();
+        }
+
         private void PopulateDropdown()
         {
             if (areaDropdown == null) return;
@@ -72,22 +65,18 @@ namespace SeatingChartApp.Runtime.Systems
             areaDropdown.options = options;
         }
 
-        /// <summary>
-        /// Called when the dropdown value changes.  Deactivates all area
-        /// containers except the selected one, gathers its seats and passes
-        /// them to the LayoutManager for management.
-        /// </summary>
-        /// <param name="index">Index of the selected area.</param>
         private void SwitchArea(int index)
         {
             if (_layoutManager == null)
+            {
+                DebugManager.LogError(LogCategory.General, "LayoutManager not found. Cannot switch area.");
                 return;
-            if (index < 0 || index >= areaContainers.Count)
-                return;
-            // Record current index
+            }
+            if (index < 0 || index >= areaContainers.Count) return;
+
             _currentAreaIndex = index;
-            // Save current area layout via layout manager
-            // Deactivate all area containers
+            CurrentAreaName = areaNames != null && index < areaNames.Count ? areaNames[index] : $"Area{index}";
+
             for (int i = 0; i < areaContainers.Count; i++)
             {
                 if (areaContainers[i] != null)
@@ -95,21 +84,16 @@ namespace SeatingChartApp.Runtime.Systems
                     areaContainers[i].gameObject.SetActive(i == index);
                 }
             }
-            // Gather seats from the selected container
+
             List<SeatController> seats = new List<SeatController>();
             if (areaContainers[index] != null)
             {
                 seats.AddRange(areaContainers[index].GetComponentsInChildren<SeatController>(true));
             }
-            string areaName = areaNames != null && index < areaNames.Count ? areaNames[index] : $"Area{index}";
-            _layoutManager.SwitchArea(areaName, seats);
+
+            _layoutManager.SwitchArea(CurrentAreaName, seats);
         }
 
-        /// <summary>
-        /// Returns the container transform for the currently selected area.  Useful when
-        /// spawning new seats so they are parented to the correct area.  May return null
-        /// if no area has been selected yet.
-        /// </summary>
         public Transform GetCurrentAreaContainer()
         {
             if (_currentAreaIndex < 0 || _currentAreaIndex >= areaContainers.Count)

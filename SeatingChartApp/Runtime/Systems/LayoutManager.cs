@@ -1,101 +1,57 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
 using SeatingChartApp.Runtime.Data;
 using UnityEngine;
+using System;
 
 namespace SeatingChartApp.Runtime.Systems
 {
     /// <summary>
-    /// Central manager responsible for persisting and restoring seat layout
-    /// information.  Maintains a list of all SeatController instances in the
-    /// scene, saves their state to disk on change or on application quit, and
-    /// restores their positions and occupancy on load.
+    /// Central manager for persisting and restoring seat layouts. Now supports
+    /// a separate "default" layout file that can be explicitly saved and restored by admins.
     /// </summary>
     public class LayoutManager : MonoBehaviour
     {
-        public static LayoutManager Instance { get; private set; }
-
-        /// <summary>
-        /// All seats currently registered in the layout.  Seats register
-        /// themselves in Awake so the manager can operate on them.
-        /// </summary>
         public List<SeatController> Seats = new List<SeatController>();
-
         private bool _layoutDirty;
-
-        /// <summary>
-        /// Name of the current seating area (e.g. "Pool" or "Waterpark").
-        /// Used to prefix the save file so multiple areas can be persisted separately.
-        /// </summary>
-        [Tooltip("Logical name of the current seating area.  Save files will be named using this value.")]
         public string CurrentAreaName = "Default";
 
-        private string SaveFilePath
-        {
-            get
-            {
-                string fileName = $"seatlayout_{CurrentAreaName}.json";
-                return Path.Combine(Application.persistentDataPath, fileName);
-            }
-        }
+        // The file for the current, operational layout
+        private string WorkingSaveFilePath => Path.Combine(Application.persistentDataPath, $"seatlayout_{CurrentAreaName}_working.json");
+
+        // 🆕 NEW: The file for the admin-defined master/default layout
+        private string DefaultSaveFilePath => Path.Combine(Application.persistentDataPath, $"seatlayout_{CurrentAreaName}_default.json");
 
         private void Awake()
         {
-            if (Instance != null && Instance != this)
-            {
-                Destroy(gameObject);
-                return;
-            }
-            Instance = this;
+            ServiceProvider.Register(this);
             DontDestroyOnLoad(gameObject);
+        }
+
+        private void OnDestroy()
+        {
+            ServiceProvider.Unregister<LayoutManager>();
         }
 
         private void Start()
         {
-            // Gather seats from the scene.  If your seats are dynamically
-            // instantiated this could be deferred or made more robust with
-            // registration callbacks.  Use the non‑allocating API in newer
-            // Unity versions to avoid the deprecated FindObjectsOfType.
-#if UNITY_2023_1_OR_NEWER
-            SeatController[] existingSeats = FindObjectsByType<SeatController>(FindObjectsSortMode.None);
-            Seats.AddRange(existingSeats);
-#else
-            Seats.AddRange(FindObjectsOfType<SeatController>());
-#endif
-            // Load any previously saved layout
             LoadLayout();
         }
 
         private void OnApplicationQuit()
         {
-            // Save on exit to ensure layout isn't lost on abrupt closure
             SaveLayout();
         }
 
-        /// <summary>
-        /// Switches the current area name and updates the internal seat list.
-        /// This method should be called by the AreaManager when
-        /// a new seating area is selected.  It saves the current layout,
-        /// updates the Seats list from the provided seats and then loads
-        /// the new area's layout from disk.
-        /// </summary>
         public void SwitchArea(string areaName, List<SeatController> areaSeats)
         {
-            // Save the current area's layout before switching
             SaveLayout();
             CurrentAreaName = areaName;
-            // Replace the seat list
             Seats.Clear();
             Seats.AddRange(areaSeats);
-            // Load the new layout (if any)
             LoadLayout();
         }
 
-        /// <summary>
-        /// Flags the layout as dirty which causes it to be saved on the next
-        /// update cycle.  This allows for multiple drags or edits without
-        /// repeatedly writing to disk every frame.
-        /// </summary>
         public void MarkLayoutDirty()
         {
             _layoutDirty = true;
@@ -111,151 +67,187 @@ namespace SeatingChartApp.Runtime.Systems
         }
 
         /// <summary>
-        /// Serializes the current seat layout to JSON and writes it to
-        /// persistent data path.  Each seat's ID, anchored position, state and
-        /// guest (if any) are captured.
+        /// Saves the current seat layout to the working file.
         /// </summary>
         public void SaveLayout()
         {
-            var layout = new SeatLayoutData();
-            layout.seats = new List<SeatData>();
-            foreach (var seat in Seats)
-            {
-                if (seat == null)
-                    continue;
-                var rect = seat.transform as RectTransform;
-                var data = new SeatData
-                {
-                    seatID = seat.SeatID,
-                    anchoredPosition = rect != null ? rect.anchoredPosition : Vector2.zero,
-                    state = seat.State,
-                    guest = seat.CurrentGuest != null ? new GuestData(seat.CurrentGuest.FirstName, seat.CurrentGuest.LastName, seat.CurrentGuest.RoomNumber, seat.CurrentGuest.PartySize, seat.CurrentGuest.GuestID, seat.CurrentGuest.Notes) : null,
-                    capacity = seat.Capacity
-                };
-                layout.seats.Add(data);
-            }
-            string json = JsonUtility.ToJson(layout, true);
+            var layout = CreateLayoutDataFromScene();
             try
             {
-                File.WriteAllText(SaveFilePath, json);
+                string json = JsonUtility.ToJson(layout, true);
+                File.WriteAllText(WorkingSaveFilePath, json);
+                // We don't log this every time to avoid spamming the console
             }
-            catch (IOException ex)
+            catch (Exception ex)
             {
-                Debug.LogError($"Failed to save seating layout: {ex.Message}");
+                DebugManager.LogError(LogCategory.Saving, $"Failed to save working layout for '{CurrentAreaName}': {ex.Message}");
             }
         }
 
         /// <summary>
-        /// Loads the seat layout from disk if present, restoring seat positions
-        /// and state.  If no file exists nothing is changed.  Should be
-        /// called after seats have been collected.
+        /// 🆕 NEW: Saves the current seat layout as the new default/master layout.
+        /// This is an explicit admin action.
+        /// </summary>
+        public void SaveAsDefaultLayout()
+        {
+            var layout = CreateLayoutDataFromScene();
+            try
+            {
+                string json = JsonUtility.ToJson(layout, true);
+                File.WriteAllText(DefaultSaveFilePath, json);
+                DebugManager.Log(LogCategory.Saving, $"SUCCESS: Current arrangement for '{CurrentAreaName}' has been saved as the new default layout.");
+            }
+            catch (Exception ex)
+            {
+                DebugManager.LogError(LogCategory.Saving, $"Failed to save default layout for '{CurrentAreaName}': {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Loads the working seat layout from disk.
         /// </summary>
         public void LoadLayout()
         {
-            if (!File.Exists(SaveFilePath))
+            if (!File.Exists(WorkingSaveFilePath))
+            {
+                DebugManager.Log(LogCategory.Saving, $"No working layout found for '{CurrentAreaName}'. Attempting to load default layout.");
+                ResetLayoutToDefault(); // If no working copy, start with the default
                 return;
+            }
+
             try
             {
-                string json = File.ReadAllText(SaveFilePath);
+                string json = File.ReadAllText(WorkingSaveFilePath);
                 var layout = JsonUtility.FromJson<SeatLayoutData>(json);
-                if (layout == null || layout.seats == null)
-                    return;
-                foreach (var data in layout.seats)
-                {
-                    var seat = Seats.Find(s => s.SeatID == data.seatID);
-                    if (seat == null)
-                        continue;
-                    var rect = seat.transform as RectTransform;
-                    if (rect != null)
-                    {
-                        rect.anchoredPosition = data.anchoredPosition;
-                    }
-                    seat.State = data.state;
-                    seat.Capacity = data.capacity > 0 ? data.capacity : seat.Capacity;
-                    if (data.guest != null)
-                    {
-                        seat.CurrentGuest = new GuestData(data.guest.FirstName, data.guest.LastName, data.guest.RoomNumber, data.guest.PartySize, data.guest.GuestID, data.guest.Notes);
-                    }
-                    else
-                    {
-                        seat.CurrentGuest = null;
-                    }
-                    // If the seat is occupied we treat the seat as just seated; the timer will start at zero on load
-                    if (seat.State == SeatState.Occupied && seat.CurrentGuest != null)
-                    {
-                        seat.OccupiedStartTime = Time.time;
-                    }
-                    seat.UpdateVisualState();
-                }
+                ApplyLayoutDataToScene(layout);
+                DebugManager.Log(LogCategory.Saving, $"Working layout for area '{CurrentAreaName}' loaded successfully.");
             }
-            catch (IOException ex)
+            catch (Exception ex)
             {
-                Debug.LogError($"Failed to load seating layout: {ex.Message}");
+                DebugManager.LogError(LogCategory.Saving, $"Failed to load working layout for '{CurrentAreaName}': {ex.Message}");
             }
         }
 
         /// <summary>
-        /// Deletes the current layout file and resets all seats back to their
-        /// default state.  Positions are cleared to zero and guests removed.
-        /// This should only be called by admins via AdminToolsManager.
+        /// 🆕 UPDATED: Resets the layout. It now loads from the default file if it exists,
+        /// otherwise it clears all seats.
         /// </summary>
-        public void ResetLayout()
+        public void ResetLayoutToDefault()
         {
-            // Delete the save file if it exists
+            // First, delete the current working copy
             try
             {
-                if (File.Exists(SaveFilePath))
+                if (File.Exists(WorkingSaveFilePath)) File.Delete(WorkingSaveFilePath);
+            }
+            catch (Exception ex)
+            {
+                DebugManager.LogError(LogCategory.Saving, $"Could not delete working layout file during reset: {ex.Message}");
+            }
+
+            // Now, load the default layout if it exists
+            if (File.Exists(DefaultSaveFilePath))
+            {
+                try
                 {
-                    File.Delete(SaveFilePath);
+                    string json = File.ReadAllText(DefaultSaveFilePath);
+                    var layout = JsonUtility.FromJson<SeatLayoutData>(json);
+                    ApplyLayoutDataToScene(layout);
+                    DebugManager.Log(LogCategory.Saving, $"SUCCESS: Layout for '{CurrentAreaName}' has been reset to the saved default.");
+                }
+                catch (Exception ex)
+                {
+                    DebugManager.LogError(LogCategory.Saving, $"Error loading default layout during reset: {ex.Message}. Performing hard reset.");
+                    HardResetSeats();
                 }
             }
-            catch (IOException ex)
+            else
             {
-                Debug.LogError($"Failed to reset layout: {ex.Message}");
+                // If no default file exists, perform a hard reset
+                DebugManager.LogWarning(LogCategory.Saving, "No default layout saved. Performing hard reset to empty state.");
+                HardResetSeats();
             }
-            // Reset seat positions and clear any guests/state
+
+            // Mark dirty to save this reset state as the new working copy
+            MarkLayoutDirty();
+        }
+
+        private void HardResetSeats()
+        {
             foreach (var seat in Seats)
             {
-                if (seat == null)
-                    continue;
+                if (seat == null) continue;
                 seat.ClearSeat();
                 var rect = seat.transform as RectTransform;
                 if (rect != null)
                 {
                     rect.anchoredPosition = Vector2.zero;
+                    rect.localEulerAngles = Vector3.zero;
                 }
                 seat.UpdateVisualState();
             }
-            MarkLayoutDirty();
         }
 
-        /// <summary>
-        /// Registers a seat with the layout manager.  If the seat is already
-        /// present in the Seats list it will not be added again.  This should
-        /// be called when dynamically creating seats at runtime (e.g. via the
-        /// Add Seat UI).  Seats created in the scene at start will be
-        /// discovered automatically in Start().
-        /// </summary>
-        public void RegisterSeat(SeatController seat)
+        private SeatLayoutData CreateLayoutDataFromScene()
         {
-            if (seat == null)
-                return;
-            if (!Seats.Contains(seat))
+            var layout = new SeatLayoutData();
+            foreach (var seat in Seats)
             {
-                Seats.Add(seat);
+                if (seat == null) continue;
+                var rect = seat.transform as RectTransform;
+                var data = new SeatData
+                {
+                    seatID = seat.SeatID,
+                    anchoredPosition = rect != null ? rect.anchoredPosition : Vector2.zero,
+                    rotation = rect != null ? rect.localEulerAngles.z : 0f,
+                    state = seat.State,
+                    guest = seat.CurrentGuest,
+                    capacity = seat.Capacity
+                };
+                layout.seats.Add(data);
+            }
+            return layout;
+        }
+
+        private void ApplyLayoutDataToScene(SeatLayoutData layout)
+        {
+            if (layout == null || layout.seats == null) return;
+
+            foreach (var data in layout.seats)
+            {
+                var seat = Seats.Find(s => s != null && s.SeatID == data.seatID);
+                if (seat == null) continue;
+
+                var rect = seat.transform as RectTransform;
+                if (rect != null)
+                {
+                    rect.anchoredPosition = data.anchoredPosition;
+                    rect.localEulerAngles = new Vector3(0, 0, data.rotation);
+                }
+
+                // When loading a layout, clear any existing guests
+                seat.State = SeatState.Available;
+                seat.CurrentGuest = null;
+
+                seat.Capacity = data.capacity > 0 ? data.capacity : seat.Capacity;
+                seat.UpdateVisualState();
             }
         }
 
-        /// <summary>
-        /// Unregisters a seat from the layout manager.  Call this when
-        /// destroying seats so they are removed from the internal list and
-        /// not persisted.  If the seat is not found no action is taken.
-        /// </summary>
+        public void RegisterSeat(SeatController seat)
+        {
+            if (seat != null && !Seats.Contains(seat))
+            {
+                Seats.Add(seat);
+                DebugManager.Log(LogCategory.Spawning, $"Seat {seat.SeatID} registered.");
+            }
+        }
+
         public void UnregisterSeat(SeatController seat)
         {
-            if (seat == null)
-                return;
-            Seats.Remove(seat);
+            if (seat != null && Seats.Remove(seat))
+            {
+                DebugManager.Log(LogCategory.Spawning, $"Seat {seat.SeatID} unregistered.");
+            }
         }
     }
 }

@@ -4,74 +4,44 @@ using UnityEngine;
 namespace SeatingChartApp.Runtime.Systems
 {
     /// <summary>
-    /// Central authority for tracking the current user role.  Other
-    /// components such as the UI and SeatController query this manager
-    /// to determine whether admin‑only functionality should be enabled.
-    /// Singleton pattern is used to ensure a single source of truth.
+    /// Central authority for tracking the current user role. It no longer uses
+    /// a singleton and relies on the ServiceProvider.
     /// </summary>
     public class UserRoleManager : MonoBehaviour
     {
-        public static UserRoleManager Instance { get; private set; }
-
-        /// <summary>
-        /// Defines the available roles in the system.  Additional roles
-        /// (e.g. Supervisor) can be added in the future.
-        /// </summary>
         public enum Role
         {
             Attendant,
             Admin
         }
 
-        /// <summary>
-        /// Current active role.  Defaults to Attendant.
-        /// </summary>
         public Role CurrentRole { get; private set; } = Role.Attendant;
-
-        /// <summary>
-        /// Raised whenever the role changes.  UI managers can subscribe
-        /// to update their visuals accordingly.
-        /// </summary>
         public event Action<Role> OnRoleChanged;
 
         private void Awake()
         {
-            if (Instance != null && Instance != this)
-            {
-                Destroy(gameObject);
-                return;
-            }
-            Instance = this;
+            ServiceProvider.Register(this);
             DontDestroyOnLoad(gameObject);
         }
 
-        /// <summary>
-        /// Assigns a new role and notifies any listeners.  Only call this
-        /// from a trusted source such as the login system or editor tools.
-        /// </summary>
+        private void OnDestroy()
+        {
+            ServiceProvider.Unregister<UserRoleManager>();
+        }
+
         public void SetRole(Role newRole)
         {
             if (CurrentRole != newRole)
             {
                 CurrentRole = newRole;
                 OnRoleChanged?.Invoke(newRole);
+                DebugManager.Log(LogCategory.Authentication, $"User role changed to {newRole}.");
             }
         }
 
-        /// <summary>
-        /// Toggles between Admin and Attendant roles.  Useful for quick
-        /// switching via a UI button.  Will emit the OnRoleChanged event.
-        /// </summary>
         public void ToggleRole()
         {
-            if (CurrentRole == Role.Admin)
-            {
-                SetRole(Role.Attendant);
-            }
-            else
-            {
-                SetRole(Role.Admin);
-            }
+            SetRole(CurrentRole == Role.Admin ? Role.Attendant : Role.Admin);
         }
     }
 }

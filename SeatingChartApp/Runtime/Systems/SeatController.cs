@@ -1,72 +1,65 @@
-using System;
-using SeatingChartApp.Runtime.Data;
-using SeatingChartApp.Runtime.UI; // Added for accessing SeatingUIManager
+﻿using SeatingChartApp.Runtime.Data;
+using SeatingChartApp.Runtime.UI;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 
 namespace SeatingChartApp.Runtime.Systems
 {
-    /// <summary>
-    /// Controls a single seat within the seating chart.  This component is
-    /// responsible for tracking the seat's state, managing its occupant
-    /// record, displaying a timer while occupied, handling click and drag
-    /// interactions, and updating its visual appearance based on its state.
-    /// </summary>
     [RequireComponent(typeof(Image))]
     public class SeatController : MonoBehaviour, IPointerClickHandler, IBeginDragHandler, IDragHandler, IEndDragHandler
     {
-        [Tooltip("The unique identifier for this seat.  Used for saving and loading layouts.")]
+        // --- Fields ---
         public int SeatID;
-
-        [Tooltip("Maximum number of guests that this seat can accommodate.  Chairs should be set to 1, tables to 4, etc.")]
         public int Capacity = 1;
-
-        [Tooltip("Current state of the seat (available, occupied, etc.)")]
         public SeatState State = SeatState.Available;
-
-        [Tooltip("Reference to any guest currently occupying this seat.")]
         public GuestData CurrentGuest;
-
-        [Tooltip("The TextMeshPro component used to display the elapsed time while occupied.")]
         public TMPro.TMP_Text TimerText;
-
-        [Tooltip("Image used to tint the seat based on its state.")]
         public Image SeatImage;
-
-        /// <summary>
-        /// When a seat becomes occupied this timestamp is recorded so the
-        /// elapsed time can be calculated each frame.
-        /// </summary>
         public float OccupiedStartTime;
 
-        // Dragging variables
         private bool _dragging;
         private Vector2 _dragOffset;
         private Vector3 _originalScale;
         private Color _originalColor;
-
-        // Grid snapping configuration
-        [Tooltip("Enable snapping seat positions to a grid on drag end.")]
         public bool snapToGrid = true;
-        [Tooltip("Grid size in pixels for snapping.")]
         public float gridSize = 50f;
 
-        // Stores the starting position before a drag begins to detect collisions or revert
-        private Vector2 _startPosition;
+        // --- Service-located Managers ---
+        private UserRoleManager _userRoleManager;
+        private SeatingUIManager _seatingUIManager;
+        private LayoutManager _layoutManager;
+        private AnalyticsManager _analyticsManager;
+        private LayoutEditManager _layoutEditManager;
 
+        // --- Unity Methods ---
         private void Awake()
         {
-            // Ensure we always have an image reference for visual feedback
-            if (SeatImage == null)
-            {
-                SeatImage = GetComponent<Image>();
-            }
+            LayoutEditManager.OnEditModeChanged += HandleEditModeChanged;
+        }
+
+        private void Start()
+        {
+            _userRoleManager = ServiceProvider.Get<UserRoleManager>();
+            _seatingUIManager = ServiceProvider.Get<SeatingUIManager>();
+            _layoutManager = ServiceProvider.Get<LayoutManager>();
+            _analyticsManager = ServiceProvider.Get<AnalyticsManager>();
+            _layoutEditManager = ServiceProvider.Get<LayoutEditManager>();
+
+            if (SeatImage == null) SeatImage = GetComponent<Image>();
+
+            if (_layoutManager != null) _layoutManager.RegisterSeat(this);
+            else DebugManager.LogError(LogCategory.General, "LayoutManager not found. Seat cannot register itself.");
+        }
+
+        private void OnDestroy()
+        {
+            if (_layoutManager != null) _layoutManager.UnregisterSeat(this);
+            LayoutEditManager.OnEditModeChanged -= HandleEditModeChanged;
         }
 
         private void Update()
         {
-            // Update the timer display if the seat is occupied
             if (State == SeatState.Occupied && TimerText != null)
             {
                 float elapsed = Time.time - OccupiedStartTime;
@@ -76,277 +69,148 @@ namespace SeatingChartApp.Runtime.Systems
             }
         }
 
-        /// <summary>
-        /// Handles tap events on this seat.  If the seat is not out of
-        /// service then it will request the seating UI manager to open the
-        /// assignment panel for this seat.
-        /// </summary>
+        // --- Public Methods ---
         public void OnPointerClick(PointerEventData eventData)
         {
-            // Prevent attendants from interacting with out‑of‑service seats,
-            // but allow admins to click them so they can restore the seat
-            if (State == SeatState.OutOfService && (UserRoleManager.Instance == null || UserRoleManager.Instance.CurrentRole != UserRoleManager.Role.Admin))
+            // 🆕 NEW: Check for right-click rotation in edit mode
+            if (_layoutEditManager != null && _layoutEditManager.IsEditModeActive && eventData.button == PointerEventData.InputButton.Right)
+            {
+                RotateSeat(45f); // Rotate by 45 degrees on right-click
+                return; // Prevent panel from opening
+            }
+
+            // If in edit mode (and it was a left-click), open the panel
+            if (_layoutEditManager != null && _layoutEditManager.IsEditModeActive)
+            {
+                _seatingUIManager?.OpenSeatAssignmentPanel(this);
                 return;
-            SeatingUIManager.Instance?.OpenSeatAssignmentPanel(this);
+            }
+
+            // Standard operational mode (left-click):
+            if (State == SeatState.OutOfService && (_userRoleManager == null || _userRoleManager.CurrentRole != UserRoleManager.Role.Admin))
+                return;
+
+            _seatingUIManager?.OpenSeatAssignmentPanel(this);
         }
 
-        /// <summary>
-        /// Assigns a guest to this seat.  The state is updated to occupied,
-        /// the occupant is stored and the timer resets.  The visual state
-        /// colours are updated accordingly.
-        /// </summary>
         public void AssignGuest(GuestData guest)
         {
-            if (guest == null)
-                return;
-            // In a more complex system you might support multiple guests per seat
-            // for table seating, but for simplicity we only store a single guest
-            // record here.  Capacity is checked by the UI manager before calling
-            // this method.
+            if (guest == null) return;
             CurrentGuest = guest;
             OccupiedStartTime = Time.time;
             State = SeatState.Occupied;
             UpdateVisualState();
-            // Persist layout when a guest is assigned
-            if (LayoutManager.Instance != null)
-            {
-                LayoutManager.Instance.MarkLayoutDirty();
-            }
+
+            _analyticsManager?.RecordGuestSeated(guest);
+            _layoutManager?.MarkLayoutDirty();
         }
 
-        /// <summary>
-        /// Determines whether a guest can be assigned to this seat based on
-        /// the seat's capacity.  This method simply checks the guest's
-        /// PartySize against the capacity and returns true if it fits.  Use
-        /// this in the UI layer to prevent oversubscribing a chair or table.
-        /// </summary>
-        public bool CanAssignGuest(GuestData guest)
-        {
-            if (guest == null)
-                return false;
-            return guest.PartySize <= Capacity;
-        }
-
-        /// <summary>
-        /// Clears the seat, removing any guest and resetting the timer.  The
-        /// state becomes available and the visual colours are updated.
-        /// </summary>
         public void ClearSeat()
         {
+            if (CurrentGuest != null) _analyticsManager?.RecordGuestCleared(CurrentGuest);
+
             CurrentGuest = null;
             State = SeatState.Available;
-            if (TimerText != null)
-            {
-                TimerText.text = string.Empty;
-            }
+            if (TimerText != null) TimerText.text = string.Empty;
             UpdateVisualState();
-            // Persist layout when a seat is cleared
-            if (LayoutManager.Instance != null)
-            {
-                LayoutManager.Instance.MarkLayoutDirty();
-            }
+
+            _layoutManager?.MarkLayoutDirty();
         }
 
-        /// <summary>
-        /// Toggles the out of service flag.  When a seat is marked as
-        /// out-of-service it cannot be interacted with and is displayed in
-        /// grey.  Toggling again will return it to the available state.
-        /// </summary>
         public void ToggleOutOfService()
         {
-            if (State == SeatState.OutOfService)
-            {
-                State = SeatState.Available;
-            }
-            else
-            {
-                // Clearing any occupant when taking the seat out of service
-                CurrentGuest = null;
-                State = SeatState.OutOfService;
-            }
-            if (TimerText != null)
-            {
-                TimerText.text = string.Empty;
-            }
+            State = (State == SeatState.OutOfService) ? SeatState.Available : SeatState.OutOfService;
+            if (State == SeatState.OutOfService) CurrentGuest = null;
+            if (TimerText != null) TimerText.text = string.Empty;
             UpdateVisualState();
-            // Persist layout when toggling out of service
-            if (LayoutManager.Instance != null)
-            {
-                LayoutManager.Instance.MarkLayoutDirty();
-            }
+
+            _layoutManager?.MarkLayoutDirty();
         }
 
         /// <summary>
-        /// Sets the seat's colour based on its current state.  Colours are
-        /// deliberately simple and high contrast for outdoor visibility.  If
-        /// you wish to theme the app differently you can modify this method
-        /// or drive it via a configuration file or ScriptableObject.
+        /// Rotates the seat by a specified angle.
         /// </summary>
+        public void RotateSeat(float angle)
+        {
+            if (transform is RectTransform rect)
+            {
+                rect.Rotate(0, 0, angle);
+                _layoutManager?.MarkLayoutDirty();
+                DebugManager.Log(LogCategory.UI, $"Seat {SeatID} rotated by {angle} degrees. New rotation: {rect.localEulerAngles.z}");
+            }
+        }
+
         public void UpdateVisualState()
         {
-            if (SeatImage == null)
-                return;
-
+            if (SeatImage == null) return;
             Color color = Color.white;
             switch (State)
             {
-                case SeatState.Available:
-                    color = Color.green;
-                    break;
-                case SeatState.Reserved:
-                    color = new Color(1f, 0.64f, 0f); // orange
-                    break;
-                case SeatState.Occupied:
-                    color = Color.red;
-                    break;
-                case SeatState.Cleaning:
-                    color = Color.yellow;
-                    break;
-                case SeatState.OutOfService:
-                    color = Color.gray;
-                    break;
+                case SeatState.Available: color = Color.green; break;
+                case SeatState.Reserved: color = new Color(1f, 0.64f, 0f); break;
+                case SeatState.Occupied: color = Color.red; break;
+                case SeatState.Cleaning: color = Color.yellow; break;
+                case SeatState.OutOfService: color = Color.gray; break;
             }
             SeatImage.color = color;
         }
 
+        // --- Event Handlers ---
+        private void HandleEditModeChanged(bool isEditMode)
+        {
+            var outline = GetComponent<Outline>();
+            if (outline == null) outline = gameObject.AddComponent<Outline>();
+            outline.enabled = isEditMode;
+            outline.effectColor = Color.yellow;
+            outline.effectDistance = new Vector2(5, -5);
+        }
+
         #region Dragging
-        /// <summary>
-        /// Begins a drag operation.  Only allowed when the current role is
-        /// Admin.  Records an offset so the seat follows the finger as
-        /// expected and provides visual feedback during the drag.
-        /// </summary>
         public void OnBeginDrag(PointerEventData eventData)
         {
-            if (UserRoleManager.Instance == null || UserRoleManager.Instance.CurrentRole != UserRoleManager.Role.Admin)
-                return;
+            if (_userRoleManager == null || _userRoleManager.CurrentRole != UserRoleManager.Role.Admin || _layoutEditManager == null || !_layoutEditManager.IsEditModeActive) return;
+
             _dragging = true;
             RectTransform rect = transform as RectTransform;
-            // Use the same parent rect that OnDrag will use for coordinate conversion
-            RectTransform parentRect = rect.parent as RectTransform;
-            if (parentRect == null)
-            {
-                parentRect = rect;
-            }
-            Vector2 localPoint;
-            RectTransformUtility.ScreenPointToLocalPointInRectangle(parentRect, eventData.position, eventData.pressEventCamera, out localPoint);
-            // Record the offset relative to the parent coordinate system
+            RectTransform parentRect = rect.parent as RectTransform ?? rect;
+
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(parentRect, eventData.position, eventData.pressEventCamera, out Vector2 localPoint);
+
             _dragOffset = rect.anchoredPosition - localPoint;
-            // Record starting position for potential collision detection
-            _startPosition = rect.anchoredPosition;
-            // Store original visuals and apply feedback
+
             _originalScale = transform.localScale;
-            _originalColor = SeatImage != null ? SeatImage.color : Color.white;
             transform.localScale = _originalScale * 1.1f;
-            if (SeatImage != null)
-            {
-                Color c = _originalColor;
-                c.a = Mathf.Min(1f, c.a + 0.2f);
-                SeatImage.color = c;
-            }
         }
 
-        /// <summary>
-        /// Continues dragging.  Only active for admins.  Moves the seat
-        /// relative to its parent canvas based on the pointer's position.
-        /// </summary>
         public void OnDrag(PointerEventData eventData)
         {
-            if (!_dragging || UserRoleManager.Instance == null || UserRoleManager.Instance.CurrentRole != UserRoleManager.Role.Admin)
-                return;
-            // Cache our own RectTransform
+            if (!_dragging) return;
+
             RectTransform rect = transform as RectTransform;
-            // Use our parent RectTransform for coordinate conversion; if none exists
-            // (i.e. the seat is not under a UI RectTransform), fall back to our own rect.
-            RectTransform parentRect = rect.parent as RectTransform;
-            if (parentRect == null)
-            {
-                parentRect = rect;
-            }
-            Vector2 localPoint;
-            // Convert the screen point into local coordinates relative to the parent rect.
-            RectTransformUtility.ScreenPointToLocalPointInRectangle(parentRect, eventData.position, eventData.pressEventCamera, out localPoint);
-            // Calculate new position based on the drag offset recorded on begin drag.
-            Vector2 newPos = localPoint + _dragOffset;
-            // Clamp the seat within the bounds of the parent rect to prevent dragging off‑screen.
-            if (parentRect != null)
-            {
-                float halfParentWidth = parentRect.rect.width * 0.5f;
-                float halfParentHeight = parentRect.rect.height * 0.5f;
-                float halfWidth = rect.rect.width * 0.5f;
-                float halfHeight = rect.rect.height * 0.5f;
-                newPos.x = Mathf.Clamp(newPos.x, -halfParentWidth + halfWidth, halfParentWidth - halfWidth);
-                newPos.y = Mathf.Clamp(newPos.y, -halfParentHeight + halfHeight, halfParentHeight - halfHeight);
-            }
-            rect.anchoredPosition = newPos;
+            RectTransform parentRect = rect.parent as RectTransform ?? rect;
+
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(parentRect, eventData.position, eventData.pressEventCamera, out Vector2 localPoint);
+
+            rect.anchoredPosition = localPoint + _dragOffset;
         }
 
-        /// <summary>
-        /// Ends the drag operation and informs the layout manager that the
-        /// layout has changed.  This triggers a save at the next update and
-        /// snaps the seat to a grid if enabled.
-        /// </summary>
         public void OnEndDrag(PointerEventData eventData)
         {
-            if (!_dragging)
-                return;
+            if (!_dragging) return;
             _dragging = false;
-            // Restore original visuals
+
             transform.localScale = _originalScale;
-            if (SeatImage != null)
-            {
-                SeatImage.color = _originalColor;
-            }
+
             RectTransform rect = transform as RectTransform;
             if (snapToGrid && rect != null)
             {
-                // Snap anchoredPosition to nearest grid size
                 Vector2 pos = rect.anchoredPosition;
                 pos.x = Mathf.Round(pos.x / gridSize) * gridSize;
                 pos.y = Mathf.Round(pos.y / gridSize) * gridSize;
                 rect.anchoredPosition = pos;
-                // Simple collision avoidance: if another seat already occupies this snapped position
-                if (LayoutManager.Instance != null)
-                {
-                    foreach (var other in LayoutManager.Instance.Seats)
-                    {
-                        if (other == null || other == this)
-                            continue;
-                        RectTransform oRect = other.transform as RectTransform;
-                        if (oRect != null)
-                        {
-                            Vector2 otherPos = oRect.anchoredPosition;
-                            // Compare within half a grid cell tolerance
-                            if (Mathf.Abs(otherPos.x - pos.x) < gridSize * 0.5f && Mathf.Abs(otherPos.y - pos.y) < gridSize * 0.5f)
-                            {
-                                // Offset horizontally to avoid overlap
-                                pos.x += gridSize;
-                                break;
-                            }
-                        }
-                    }
-                    rect.anchoredPosition = pos;
-                }
             }
-            // Clamp within parent bounds after snapping
-            if (rect != null)
-            {
-                RectTransform parent = rect.parent as RectTransform;
-                if (parent != null)
-                {
-                    Vector2 snapPos = rect.anchoredPosition;
-                    float halfParentWidth = parent.rect.width * 0.5f;
-                    float halfParentHeight = parent.rect.height * 0.5f;
-                    float halfWidth = rect.rect.width * 0.5f;
-                    float halfHeight = rect.rect.height * 0.5f;
-                    snapPos.x = Mathf.Clamp(snapPos.x, -halfParentWidth + halfWidth, halfParentWidth - halfWidth);
-                    snapPos.y = Mathf.Clamp(snapPos.y, -halfParentHeight + halfHeight, halfParentHeight - halfHeight);
-                    rect.anchoredPosition = snapPos;
-                }
-            }
-            if (LayoutManager.Instance != null)
-            {
-                LayoutManager.Instance.MarkLayoutDirty();
-            }
+
+            _layoutManager?.MarkLayoutDirty();
         }
         #endregion
     }

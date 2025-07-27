@@ -1,13 +1,10 @@
-using System;
-using UnityEngine;
+﻿using System;
 
 namespace SeatingChartApp.Runtime.Data
 {
     /// <summary>
-    /// Represents a single guest record.  This serializable class stores the
-    /// personal details for an individual or party occupying a seat.  It
-    /// intentionally avoids any behaviour so that it can be easily persisted
-    /// with JsonUtility.
+    /// Represents a single guest record. This serializable class stores the
+    /// personal details and timing information for an individual or party occupying a seat.
     /// </summary>
     [Serializable]
     public class GuestData
@@ -21,7 +18,15 @@ namespace SeatingChartApp.Runtime.Data
         public string GuestID;
         public string Notes;
 
-        public GuestData() { }
+        // 🆕 NEW: Timestamps for analytics
+        public DateTime TimeSeated;
+        public DateTime TimeCleared;
+
+        public GuestData()
+        {
+            // Generate a unique ID for each new guest instance for reliable tracking
+            GuestID = Guid.NewGuid().ToString();
+        }
 
         public GuestData(string firstName, string lastName, string roomNumber, int partySize, string guestID = "", string notes = "")
         {
@@ -29,13 +34,13 @@ namespace SeatingChartApp.Runtime.Data
             LastName = lastName;
             RoomNumber = roomNumber;
             PartySize = partySize;
-            GuestID = guestID;
+            GuestID = string.IsNullOrEmpty(guestID) ? Guid.NewGuid().ToString() : guestID;
             Notes = notes;
         }
 
         public override string ToString()
         {
-            string idPart = !string.IsNullOrEmpty(GuestID) ? $" ID:{GuestID}" : string.Empty;
+            string idPart = !string.IsNullOrEmpty(GuestID) ? $" ID:{GuestID.Substring(0, 8)}" : string.Empty;
             string notesPart = !string.IsNullOrEmpty(Notes) ? $" Notes:{Notes}" : string.Empty;
             return $"{FirstName} {LastName}{idPart} (Room: {RoomNumber}, Party: {PartySize}){notesPart}";
         }
