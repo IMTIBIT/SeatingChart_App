@@ -4,6 +4,7 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using System.Collections.Generic;
+using UnityEngine.InputSystem;
 
 namespace SeatingChartApp.Runtime.Systems
 {
@@ -96,7 +97,7 @@ namespace SeatingChartApp.Runtime.Systems
                 }
                 else
                 {
-                    if (Input.GetKey(KeyCode.LeftShift) || Input.GetKey(KeyCode.RightShift))
+                    if (Keyboard.current.leftShiftKey.isPressed || Keyboard.current.rightShiftKey.isPressed)
                     {
                         _selectionManager?.ToggleSelection(this);
                     }
