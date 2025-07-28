@@ -1,9 +1,9 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.IO;
-using SeatingChartApp.Runtime.Data;
-using UnityEngine;
-using System;
 using System.Linq;
+using UnityEngine;
+using SeatingChartApp.Runtime.Data;
 
 namespace SeatingChartApp.Runtime.Systems
 {
@@ -13,8 +13,14 @@ namespace SeatingChartApp.Runtime.Systems
         private bool _layoutDirty;
         public string CurrentAreaName = "Default";
 
-        private string WorkingSaveFilePath => Path.Combine(Application.persistentDataPath, $"seatlayout_{CurrentAreaName}_working.json");
-        private string DefaultSaveFilePath => Path.Combine(Application.persistentDataPath, $"seatlayout_{CurrentAreaName}_default.json");
+        private string WorkingSaveFilePath => Path.Combine(
+            Application.persistentDataPath,
+            $"seatlayout_{CurrentAreaName}_working.json"
+        );
+        private string DefaultSaveFilePath => Path.Combine(
+            Application.persistentDataPath,
+            $"seatlayout_{CurrentAreaName}_default.json"
+        );
 
         private void Awake()
         {
@@ -65,12 +71,12 @@ namespace SeatingChartApp.Runtime.Systems
             var layout = CreateLayoutDataFromScene();
             try
             {
-                string json = JsonUtility.ToJson(layout, true);
-                File.WriteAllText(WorkingSaveFilePath, json);
+                File.WriteAllText(WorkingSaveFilePath, JsonUtility.ToJson(layout, true));
             }
             catch (Exception ex)
             {
-                DebugManager.LogError(LogCategory.Saving, $"Failed to save working layout for '{CurrentAreaName}': {ex.Message}");
+                DebugManager.LogError(LogCategory.Saving,
+                    $"Failed to save working layout for '{CurrentAreaName}': {ex.Message}");
             }
         }
 
@@ -79,13 +85,14 @@ namespace SeatingChartApp.Runtime.Systems
             var layout = CreateLayoutDataFromScene();
             try
             {
-                string json = JsonUtility.ToJson(layout, true);
-                File.WriteAllText(DefaultSaveFilePath, json);
-                DebugManager.Log(LogCategory.Saving, $"SUCCESS: Current arrangement for '{CurrentAreaName}' has been saved as the new default layout.");
+                File.WriteAllText(DefaultSaveFilePath, JsonUtility.ToJson(layout, true));
+                DebugManager.Log(LogCategory.Saving,
+                    $"SUCCESS: Current arrangement for '{CurrentAreaName}' has been saved as the new default layout.");
             }
             catch (Exception ex)
             {
-                DebugManager.LogError(LogCategory.Saving, $"Failed to save default layout for '{CurrentAreaName}': {ex.Message}");
+                DebugManager.LogError(LogCategory.Saving,
+                    $"Failed to save default layout for '{CurrentAreaName}': {ex.Message}");
             }
         }
 
@@ -99,39 +106,45 @@ namespace SeatingChartApp.Runtime.Systems
 
             try
             {
-                string json = File.ReadAllText(WorkingSaveFilePath);
+                var json = File.ReadAllText(WorkingSaveFilePath);
                 var layout = JsonUtility.FromJson<SeatLayoutData>(json);
                 ApplyLayoutDataToScene(layout);
-                DebugManager.Log(LogCategory.Saving, $"Working layout for area '{CurrentAreaName}' loaded successfully.");
+                DebugManager.Log(LogCategory.Saving,
+                    $"Working layout for area '{CurrentAreaName}' loaded successfully.");
             }
             catch (Exception ex)
             {
-                DebugManager.LogError(LogCategory.Saving, $"Failed to load working layout for '{CurrentAreaName}': {ex.Message}");
+                DebugManager.LogError(LogCategory.Saving,
+                    $"Failed to load working layout for '{CurrentAreaName}': {ex.Message}");
             }
         }
 
         public void ResetLayoutToDefault()
         {
-            if (File.Exists(WorkingSaveFilePath)) try { File.Delete(WorkingSaveFilePath); } catch { }
+            if (File.Exists(WorkingSaveFilePath))
+                File.Delete(WorkingSaveFilePath);
 
             if (File.Exists(DefaultSaveFilePath))
             {
                 try
                 {
-                    string json = File.ReadAllText(DefaultSaveFilePath);
+                    var json = File.ReadAllText(DefaultSaveFilePath);
                     var layout = JsonUtility.FromJson<SeatLayoutData>(json);
                     ApplyLayoutDataToScene(layout);
-                    DebugManager.Log(LogCategory.Saving, $"SUCCESS: Layout for '{CurrentAreaName}' has been reset to the saved default.");
+                    DebugManager.Log(LogCategory.Saving,
+                        $"SUCCESS: Layout for '{CurrentAreaName}' has been reset to the saved default.");
                 }
                 catch (Exception ex)
                 {
-                    DebugManager.LogError(LogCategory.Saving, $"Error loading default layout during reset: {ex.Message}. Performing hard reset.");
+                    DebugManager.LogError(LogCategory.Saving,
+                        $"Error loading default layout during reset: {ex.Message}. Performing hard reset.");
                     HardResetSeats();
                 }
             }
             else
             {
-                DebugManager.LogWarning(LogCategory.Saving, "No default layout saved. Performing hard reset to empty state.");
+                DebugManager.LogWarning(LogCategory.Saving,
+                    "No default layout saved. Performing hard reset to empty state.");
                 HardResetSeats();
             }
             MarkLayoutDirty();
@@ -143,8 +156,7 @@ namespace SeatingChartApp.Runtime.Systems
             {
                 if (seat == null) continue;
                 seat.ClearSeat();
-                var rect = seat.transform as RectTransform;
-                if (rect != null)
+                if (seat.transform is RectTransform rect)
                 {
                     rect.anchoredPosition = Vector2.zero;
                     rect.localEulerAngles = Vector3.zero;
@@ -168,7 +180,7 @@ namespace SeatingChartApp.Runtime.Systems
                     state = seat.State,
                     guest = seat.CurrentGuest,
                     capacity = seat.Capacity,
-                    parentAreaName = seat.transform.parent.name // 🆕 NEW: Save the parent container's name
+                    parentAreaName = seat.transform.parent.name
                 };
                 layout.seats.Add(data);
             }
@@ -177,37 +189,36 @@ namespace SeatingChartApp.Runtime.Systems
 
         private void ApplyLayoutDataToScene(SeatLayoutData layout)
         {
-            if (layout == null || layout.seats == null) return;
+            if (layout?.seats == null) return;
 
-            var areaManager = ServiceProvider.Get<AreaManager>();
+            var areaMgr = ServiceProvider.Get<AreaManager>();
 
             foreach (var data in layout.seats)
             {
-                // Find the seat in the currently managed list
-                var seat = Seats.Find(s => s != null && s.SeatID == data.seatID);
+                var seat = Seats.Find(s => s?.SeatID == data.seatID);
                 if (seat == null) continue;
 
-                var rect = seat.transform as RectTransform;
-
-                // 🆕 NEW: Ensure the seat is in the correct parent container
-                if (areaManager != null && !string.IsNullOrEmpty(data.parentAreaName))
+                if (areaMgr != null && !string.IsNullOrEmpty(data.parentAreaName))
                 {
-                    Transform correctParent = areaManager.areaContainers.FirstOrDefault(t => t.name == data.parentAreaName);
-                    if (correctParent != null && seat.transform.parent != correctParent)
-                    {
-                        seat.transform.SetParent(correctParent, true);
-                    }
+                    var parent = areaMgr.areaContainers
+                        .FirstOrDefault(t => t.name == data.parentAreaName);
+                    if (parent != null && seat.transform.parent != parent)
+                        seat.transform.SetParent(parent, true);
                 }
 
-                if (rect != null)
+                if (seat.transform is RectTransform rect)
                 {
                     rect.anchoredPosition = data.anchoredPosition;
                     rect.localEulerAngles = new Vector3(0, 0, data.rotation);
                 }
 
-                seat.State = SeatState.Available;
-                seat.CurrentGuest = null;
+                seat.State = data.state;
+                seat.CurrentGuest = data.guest;
                 seat.Capacity = data.capacity > 0 ? data.capacity : seat.Capacity;
+
+                if (seat.State == SeatState.Occupied)
+                    seat.OccupiedStartTime = Time.time;
+
                 seat.UpdateVisualState();
             }
         }
@@ -215,14 +226,13 @@ namespace SeatingChartApp.Runtime.Systems
         public void RegisterSeat(SeatController seat)
         {
             if (seat != null && !Seats.Contains(seat))
-            {
                 Seats.Add(seat);
-            }
         }
 
         public void UnregisterSeat(SeatController seat)
         {
-            if (seat != null) Seats.Remove(seat);
+            if (seat != null)
+                Seats.Remove(seat);
         }
     }
 }

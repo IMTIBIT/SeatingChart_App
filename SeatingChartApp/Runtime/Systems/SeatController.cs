@@ -3,8 +3,8 @@ using SeatingChartApp.Runtime.UI;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
-using System.Collections.Generic;
 using UnityEngine.InputSystem;
+using System.Collections.Generic;
 
 namespace SeatingChartApp.Runtime.Systems
 {
@@ -26,7 +26,7 @@ namespace SeatingChartApp.Runtime.Systems
         public bool snapToGrid = true;
         public float gridSize = 50f;
 
-        // --- Service-located Managers ---
+        // --- Service‑located Managers ---
         private UserRoleManager _userRoleManager;
         private SeatingUIManager _seatingUIManager;
         private LayoutManager _layoutManager;
@@ -38,9 +38,9 @@ namespace SeatingChartApp.Runtime.Systems
         private Outline _selectionOutline;
         private Outline _editModeOutline;
 
-        // --- Unity Methods ---
         private void Awake()
         {
+            ServiceProvider.Register(this);
             LayoutEditManager.OnEditModeChanged += HandleEditModeChanged;
             SelectionManager.OnSelectionChanged += HandleSelectionChanged;
         }
@@ -68,45 +68,68 @@ namespace SeatingChartApp.Runtime.Systems
             _selectionOutline.effectDistance = new Vector2(-4, 4);
             _selectionOutline.enabled = false;
 
-            if (_layoutManager != null) _layoutManager.RegisterSeat(this);
+            _layoutManager?.RegisterSeat(this);
         }
 
         private void OnDestroy()
         {
-            if (_layoutManager != null) _layoutManager.UnregisterSeat(this);
+            _layoutManager ??= ServiceProvider.Get<LayoutManager>();
+            _layoutManager?.UnregisterSeat(this);
+
             LayoutEditManager.OnEditModeChanged -= HandleEditModeChanged;
             SelectionManager.OnSelectionChanged -= HandleSelectionChanged;
+
+            ServiceProvider.Unregister<SeatController>();
         }
 
-        // --- Public Methods ---
         public void OnPointerClick(PointerEventData eventData)
         {
-            bool isEditMode = _layoutEditManager != null && _layoutEditManager.IsEditModeActive;
+            bool isEdit = _layoutEditManager != null && _layoutEditManager.IsEditModeActive;
 
-            if (isEditMode && eventData.button == PointerEventData.InputButton.Right)
+            // Right‑click rotates—even mid‑drag—and cancels any scaling
+            if (isEdit && eventData.button == PointerEventData.InputButton.Right)
             {
+                CancelDrag();
                 RotateSeat(45f);
                 return;
             }
 
             if (eventData.button == PointerEventData.InputButton.Left)
             {
-                if (isEditMode)
+                if (isEdit)
                 {
                     _seatingUIManager?.OpenSeatAssignmentPanel(this);
                 }
                 else
                 {
-                    if (Keyboard.current.leftShiftKey.isPressed || Keyboard.current.rightShiftKey.isPressed)
-                    {
+                    bool shift = (Keyboard.current?.leftShiftKey.isPressed ?? false)
+                              || (Keyboard.current?.rightShiftKey.isPressed ?? false);
+
+                    if (shift)
                         _selectionManager?.ToggleSelection(this);
-                    }
                     else
                     {
                         _selectionManager?.SelectOnly(this);
                         _seatingUIManager?.OpenSeatAssignmentPanel(this);
                     }
                 }
+            }
+        }
+
+        private void CancelDrag()
+        {
+            if (!_dragging) return;
+            _dragging = false;
+            transform.localScale = _originalScale;
+        }
+
+        public void RotateSeat(float angle)
+        {
+            CancelDrag();  // ensure clean state
+            if (transform is RectTransform rect)
+            {
+                rect.Rotate(0, 0, angle);
+                _layoutManager?.MarkLayoutDirty();
             }
         }
 
@@ -123,80 +146,73 @@ namespace SeatingChartApp.Runtime.Systems
 
         public void ClearSeat()
         {
-            if (CurrentGuest != null) _analyticsManager?.RecordGuestCleared(CurrentGuest);
+            if (CurrentGuest != null)
+                _analyticsManager?.RecordGuestCleared(CurrentGuest);
+
             CurrentGuest = null;
             State = SeatState.Available;
-            if (TimerText != null) TimerText.text = string.Empty;
+
+            if (TimerText != null)
+                TimerText.text = string.Empty;
+
             UpdateVisualState();
             _layoutManager?.MarkLayoutDirty();
         }
 
-        /// <summary>
-        /// 🆕 FIXED: This method was missing and has been restored.
-        /// Toggles the out of service flag for the seat.
-        /// </summary>
         public void ToggleOutOfService()
         {
-            State = (State == SeatState.OutOfService) ? SeatState.Available : SeatState.OutOfService;
+            State = (State == SeatState.OutOfService)
+                ? SeatState.Available
+                : SeatState.OutOfService;
+
             if (State == SeatState.OutOfService)
-            {
                 CurrentGuest = null;
-            }
+
             if (TimerText != null)
-            {
                 TimerText.text = string.Empty;
-            }
+
             UpdateVisualState();
             _layoutManager?.MarkLayoutDirty();
-        }
-
-        public void RotateSeat(float angle)
-        {
-            if (transform is RectTransform rect)
-            {
-                rect.Rotate(0, 0, angle);
-                _layoutManager?.MarkLayoutDirty();
-            }
         }
 
         public void UpdateVisualState()
         {
             if (SeatImage == null) return;
-            Color color = Color.white;
-            switch (State)
+            Color color = State switch
             {
-                case SeatState.Available: color = Color.green; break;
-                case SeatState.Reserved: color = new Color(1f, 0.64f, 0f); break;
-                case SeatState.Occupied: color = Color.red; break;
-                case SeatState.Cleaning: color = Color.yellow; break;
-                case SeatState.OutOfService: color = Color.gray; break;
-            }
+                SeatState.Available => Color.green,
+                SeatState.Reserved => new Color(1f, 0.64f, 0f),
+                SeatState.Occupied => Color.red,
+                SeatState.Cleaning => Color.yellow,
+                SeatState.OutOfService => Color.gray,
+                _ => Color.white
+            };
             SeatImage.color = color;
         }
 
-        // --- Event Handlers ---
-        private void HandleEditModeChanged(bool isEditMode)
-        {
-            if (_editModeOutline != null) _editModeOutline.enabled = isEditMode;
-        }
-
-        private void HandleSelectionChanged(List<SeatController> selectedSeats)
-        {
-            if (_selectionOutline != null)
-            {
-                _selectionOutline.enabled = selectedSeats.Contains(this);
-            }
-        }
+        private void HandleEditModeChanged(bool isEdit) => _editModeOutline.enabled = isEdit;
+        private void HandleSelectionChanged(List<SeatController> sel) => _selectionOutline.enabled = sel.Contains(this);
 
         #region Dragging
         public void OnBeginDrag(PointerEventData eventData)
         {
-            if (_userRoleManager == null || _userRoleManager.CurrentRole != UserRoleManager.Role.Admin || _layoutEditManager == null || !_layoutEditManager.IsEditModeActive) return;
+            if (_dragging
+                || _userRoleManager?.CurrentRole != UserRoleManager.Role.Admin
+                || !_layoutEditManager.IsEditModeActive)
+                return;
+
             _dragging = true;
-            RectTransform rect = transform as RectTransform;
-            RectTransform parentRect = rect.parent as RectTransform ?? rect;
-            RectTransformUtility.ScreenPointToLocalPointInRectangle(parentRect, eventData.position, eventData.pressEventCamera, out Vector2 localPoint);
-            _dragOffset = rect.anchoredPosition - localPoint;
+            var rect = transform as RectTransform;
+            var parentRect = rect?.parent as RectTransform ?? rect;
+
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                parentRect,
+                eventData.position,
+                eventData.pressEventCamera,
+                out Vector2 local
+            );
+
+            _dragOffset = rect.anchoredPosition - local;
             _originalScale = transform.localScale;
             transform.localScale = _originalScale * 1.1f;
         }
@@ -204,10 +220,15 @@ namespace SeatingChartApp.Runtime.Systems
         public void OnDrag(PointerEventData eventData)
         {
             if (!_dragging) return;
-            RectTransform rect = transform as RectTransform;
-            RectTransform parentRect = rect.parent as RectTransform ?? rect;
-            RectTransformUtility.ScreenPointToLocalPointInRectangle(parentRect, eventData.position, eventData.pressEventCamera, out Vector2 localPoint);
-            rect.anchoredPosition = localPoint + _dragOffset;
+            var rect = transform as RectTransform;
+            var parentRect = rect?.parent as RectTransform ?? rect;
+            RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                parentRect,
+                eventData.position,
+                eventData.pressEventCamera,
+                out Vector2 local
+            );
+            rect.anchoredPosition = local + _dragOffset;
         }
 
         public void OnEndDrag(PointerEventData eventData)
@@ -215,14 +236,16 @@ namespace SeatingChartApp.Runtime.Systems
             if (!_dragging) return;
             _dragging = false;
             transform.localScale = _originalScale;
-            RectTransform rect = transform as RectTransform;
-            if (snapToGrid && rect != null)
+
+            var rect = transform as RectTransform;
+            if (snapToGrid && rect != null && gridSize > 0f)
             {
                 Vector2 pos = rect.anchoredPosition;
                 pos.x = Mathf.Round(pos.x / gridSize) * gridSize;
                 pos.y = Mathf.Round(pos.y / gridSize) * gridSize;
                 rect.anchoredPosition = pos;
             }
+
             _layoutManager?.MarkLayoutDirty();
         }
         #endregion
